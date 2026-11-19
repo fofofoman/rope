@@ -1,0 +1,1314 @@
+<roblox version="4">
+  <Item class="ReplicatedStorage" referent="0">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="1">
+      <Properties>
+        <string name="Name">Remotes</string>
+      </Properties>
+      <Item class="RemoteEvent" referent="2">
+        <Properties>
+          <string name="Name">MashBatch</string>
+        </Properties>
+      </Item>
+      <Item class="RemoteEvent" referent="3">
+        <Properties>
+          <string name="Name">MatchState</string>
+        </Properties>
+      </Item>
+      <Item class="RemoteEvent" referent="4">
+        <Properties>
+          <string name="Name">PuzzleIssued</string>
+        </Properties>
+      </Item>
+      <Item class="RemoteEvent" referent="5">
+        <Properties>
+          <string name="Name">PuzzleResult</string>
+        </Properties>
+      </Item>
+      <Item class="RemoteEvent" referent="6">
+        <Properties>
+          <string name="Name">PuzzleSubmit</string>
+        </Properties>
+      </Item>
+      <Item class="RemoteEvent" referent="7">
+        <Properties>
+          <string name="Name">QteIssued</string>
+        </Properties>
+      </Item>
+      <Item class="RemoteEvent" referent="8">
+        <Properties>
+          <string name="Name">QteResponse</string>
+        </Properties>
+      </Item>
+    </Item>
+    <Item class="Folder" referent="9">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="ModuleScript" referent="10">
+        <Properties>
+          <string name="Name">Config</string>
+          <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 경기, 입력, 퍼즐 및 봇의 초기 밸런스 값 정의
+
+return {
+	ROUND_DURATION = 45,
+	COUNTDOWN = 3,
+	ROPE_LIMIT = 100,
+	ROPE_SPEED = 2.5,
+
+	INPUT_BATCH_INTERVAL = 0.2,
+	ROPE_REPLICATE_INTERVAL = 0.1,
+
+	SOFT_CAP = 8,
+	OVER_CAP_RATIO = 0.5,
+	MAX_TAPS_PER_SEC = 15,
+
+	QTE_INTERVAL = { 6, 10 },
+	QTE_WINDOW = 1.5,
+	QTE_MIN_REACTION = 0.15,
+	QTE_SUCCESS_PULL = 5,
+	QTE_FAIL_STUN = 0.6,
+	SWIPE_MIN_DISTANCE = 40,
+
+	PUZZLE_INTERVAL = { 8, 12 },
+	PUZZLE_TIMEOUT = 5,
+	PUZZLE_MIN_SOLVE_TIME = 0.6,
+	PUZZLE_ACTIVE_MASH_MULT = 1.0,
+	BUFF_MULT = 1.5,
+	BUFF_DURATION = 3,
+	INSTANT_PULL = 8,
+	-- 2026-11-19 첫 퍼즐 시점과 화살표 순서 설정 추가
+	PUZZLE_FIRST_DELAY = 2,
+	ARROW_SEQUENCE_LENGTH = { 4, 6 },
+	ARROW_DIRECTIONS = { "Up", "Right", "Down", "Left" },
+
+	BOT = {
+		Easy = { tps = 5, qteRate = 0.5, puzzleRate = 0.5 },
+		Normal = { tps = 7, qteRate = 0.7, puzzleRate = 0.7 },
+		Hard = { tps = 9, qteRate = 0.9, puzzleRate = 0.9 },
+	},
+
+	-- 2026-11-19 연타 제한과 프로토타입 경기장 표시 설정 추가
+	MASH_WINDOW = 1,
+	MIN_MASH_BATCH_INTERVAL = 0.1,
+	MAX_MASH_BATCH_INTERVAL = 0.4,
+	ARENA_NAME = "PullPanicArena",
+	ARENA_VIEW = {
+		width = 44,
+		depth = 12,
+		floorThickness = 1,
+		centerLineWidth = 0.15,
+		endLineWidth = 0.45,
+		travel = 12,
+		ropeLength = 17,
+		ropeHeight = 2.5,
+		ropeThickness = 0.35,
+		knotSize = 0.9,
+		cameraHeight = 20,
+		cameraDistance = 33,
+	},
+	MASH_BUTTON = { left = 0.04, bottom = 0.08, width = 0.22, height = 0.23 },
+
+	-- 2026-11-19 퍼즐 패널과 버프 표시 배치 추가
+	PUZZLE_VIEW = {
+		right = 0.04, centerY = 0.48, width = 0.33, height = 0.52, inset = 0.06,
+		titleTop = 0.06, titleHeight = 0.17, bodyTop = 0.29, bodyHeight = 0.48,
+		footerTop = 0.81, footerHeight = 0.13,
+		sequenceHeight = 0.42, buttonTop = 0.54, tileGap = 0.035,
+		cornerRadius = 8, badgeBottom = 0.08, badgeHeight = 0.1, resultDuration = 1,
+	},
+
+	DEBUG = true,
+}
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="11">
+        <Properties>
+          <string name="Name">Remotes</string>
+          <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 Rojo에서 생성한 RemoteEvent 참조를 공용 모듈에서 제공
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Types = require(script.Parent.Types)
+
+local remoteFolder = ReplicatedStorage:WaitForChild("Remotes")
+assert(remoteFolder:IsA("Folder"), "ReplicatedStorage.Remotes는 Folder여야 합니다.")
+
+local function waitForRemote(name: string): RemoteEvent
+	local remote = remoteFolder:WaitForChild(name)
+	assert(remote:IsA("RemoteEvent"), name .. "은 RemoteEvent여야 합니다.")
+	return remote
+end
+
+local remotes: Types.RemoteEvents = {
+	MashBatch = waitForRemote("MashBatch"),
+	QteIssued = waitForRemote("QteIssued"),
+	QteResponse = waitForRemote("QteResponse"),
+	PuzzleIssued = waitForRemote("PuzzleIssued"),
+	PuzzleSubmit = waitForRemote("PuzzleSubmit"),
+	PuzzleResult = waitForRemote("PuzzleResult"),
+	MatchState = waitForRemote("MatchState"),
+}
+
+return remotes
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="12">
+        <Properties>
+          <string name="Name">Types</string>
+          <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 서버와 클라이언트가 공유하는 RemoteEvent 참조 타입 정의
+
+export type RemoteEvents = {
+	MashBatch: RemoteEvent,
+	QteIssued: RemoteEvent,
+	QteResponse: RemoteEvent,
+	PuzzleIssued: RemoteEvent,
+	PuzzleSubmit: RemoteEvent,
+	PuzzleResult: RemoteEvent,
+	MatchState: RemoteEvent,
+}
+
+-- 2026-11-19 경기 상태와 참가자 타입 추가
+export type MatchPhase = "Waiting" | "Countdown" | "Playing" | "Ended"
+export type MatchWinner = "A" | "B" | "Draw"
+export type MatchStateExtra = { winner: MatchWinner }
+
+-- 2026-11-19 퍼즐 정의, 클라이언트 렌더러 및 발행 상태 타입 추가
+export type PuzzleReward = "Buff" | "InstantPull"
+export type PuzzleDef = {
+	kind: string,
+	reward: PuzzleReward,
+	generate: (rng: Random, difficulty: number) -> (any, any),
+	validate: (displayData: any, solutionInfo: any, submission: unknown) -> boolean,
+}
+
+export type PuzzleRenderer = {
+	render: (parent: GuiObject, displayData: any, onSubmit: (submission: unknown) -> ()) -> (),
+	cleanup: () -> (),
+}
+
+export type ActivePuzzle = {
+	id: number,
+	definition: PuzzleDef,
+	displayData: any,
+	solutionInfo: any,
+	issuedAt: number,
+	expiresAt: number,
+}
+
+export type ParticipantState = {
+	rawTps: number,
+	buffUntil: number,
+	stunUntil: number,
+	activePuzzle: ActivePuzzle?,
+}
+
+return {}
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="13">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Folder" referent="14">
+      <Properties>
+        <string name="Name">Server</string>
+      </Properties>
+      <Item class="ModuleScript" referent="15">
+        <Properties>
+          <string name="Name">BotService</string>
+          <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 Normal 봇을 사람과 동일한 참가자 상태로 생성
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Types = require(Shared.Types)
+
+local BotService = {}
+
+function BotService.createNormalParticipant(): Types.ParticipantState
+	return { rawTps = Config.BOT.Normal.tps, buffUntil = 0, stunUntil = 0 }
+end
+
+return BotService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="16">
+        <Properties>
+          <string name="Name">Main</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 서버 진입점에서 공용 설정과 RemoteEvent 초기화 확인
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+
+-- 2026-11-19 서버 시작 시 1대1 경기 서비스를 실행
+local MatchService = require(script.Parent.MatchService)
+MatchService.start()
+
+if Config.DEBUG and RunService:IsStudio() then
+	print("[PullPanic] 서버 초기화 완료")
+end
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="17">
+        <Properties>
+          <string name="Name">MashService</string>
+          <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 연타 배치 검증과 참가자 유효 힘 계산 추가
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Types = require(Shared.Types)
+
+type AcceptedBatch = { time: number, count: number }
+export type InputState = {
+	batches: { AcceptedBatch },
+	total: number,
+	lastBatchAt: number?,
+}
+
+local MashService = {}
+
+function MashService.newInputState(): InputState
+	return { batches = {}, total = 0, lastBatchAt = nil }
+end
+
+function MashService.getRawTps(state: InputState, now: number): number
+	local cutoff = now - Config.MASH_WINDOW
+	local oldest = state.batches[1]
+	while oldest and oldest.time <= cutoff do
+		state.total -= oldest.count
+		table.remove(state.batches, 1)
+		oldest = state.batches[1]
+	end
+	return state.total / Config.MASH_WINDOW
+end
+
+function MashService.acceptBatch(state: InputState, count: unknown, now: number): ()
+	if typeof(count) ~= "number" or count ~= count or count < 1 or count == math.huge or count % 1 ~= 0 then
+		return
+	end
+
+	local lastBatchAt = state.lastBatchAt
+	local elapsed = if lastBatchAt then now - lastBatchAt else Config.INPUT_BATCH_INTERVAL
+	if elapsed < Config.MIN_MASH_BATCH_INTERVAL then
+		return
+	end
+	state.lastBatchAt = now
+
+	MashService.getRawTps(state, now)
+	local batchInterval = math.clamp(elapsed, Config.INPUT_BATCH_INTERVAL, Config.MAX_MASH_BATCH_INTERVAL)
+	local batchLimit = math.floor(Config.MAX_TAPS_PER_SEC * batchInterval)
+	local windowLimit = math.floor(Config.MAX_TAPS_PER_SEC * Config.MASH_WINDOW)
+	local accepted = math.min(count, batchLimit, windowLimit - state.total)
+	if accepted > 0 then
+		table.insert(state.batches, { time = now, count = accepted })
+		state.total += accepted
+	end
+end
+
+function MashService.getEffectiveForce(participant: Types.ParticipantState, now: number): number
+	if participant.stunUntil > now then
+		return 0
+	end
+
+	local rawTps = participant.rawTps
+	local cappedTps = math.min(rawTps, Config.SOFT_CAP)
+	local excessTps = math.max(rawTps - Config.SOFT_CAP, 0)
+	local multiplier = if participant.buffUntil > now then Config.BUFF_MULT else 1
+	-- 2026-11-19 진행 중인 퍼즐의 연타 배수 적용
+	local puzzle = participant.activePuzzle
+	if puzzle and now < puzzle.expiresAt then
+		multiplier *= Config.PUZZLE_ACTIVE_MASH_MULT
+	end
+	return (cappedTps + excessTps * Config.OVER_CAP_RATIO) * multiplier
+end
+
+return MashService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="18">
+        <Properties>
+          <string name="Name">Match</string>
+          <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 경기별 상태, 줄 위치 계산과 승패 판정 추가
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Types = require(Shared.Types)
+local MashService = require(script.Parent.MashService)
+
+type Teams = { A: { Types.ParticipantState }, B: { Types.ParticipantState } }
+type MatchState = {
+	phase: Types.MatchPhase,
+	ropePosition: number,
+	timeLeft: number,
+	teams: Teams,
+	winner: Types.MatchWinner?,
+}
+
+local Match = {}
+Match.__index = Match
+export type Match = typeof(setmetatable({} :: MatchState, Match))
+
+function Match.new(teams: Teams): Match
+	local state: MatchState = {
+		phase = "Waiting",
+		ropePosition = 0,
+		timeLeft = 0,
+		teams = teams,
+		winner = nil,
+	}
+	return setmetatable(state, Match)
+end
+
+function Match.start(self: Match): ()
+	if self.phase ~= "Waiting" then
+		return
+	end
+	self.phase = "Countdown"
+	self.timeLeft = Config.COUNTDOWN
+end
+
+local function getTeamForce(participants: { Types.ParticipantState }, now: number): number
+	local force = 0
+	for _, participant in participants do
+		force += MashService.getEffectiveForce(participant, now)
+	end
+	return force
+end
+
+function Match.step(self: Match, dt: number, now: number): ()
+	if self.phase == "Countdown" then
+		self.timeLeft -= dt
+		if self.timeLeft > 0 then
+			return
+		end
+
+		dt = -self.timeLeft
+		self.phase = "Playing"
+		self.timeLeft = Config.ROUND_DURATION
+	end
+	if self.phase ~= "Playing" then
+		return
+	end
+
+	local playingDt = math.min(dt, self.timeLeft)
+	local forceA = getTeamForce(self.teams.A, now)
+	local forceB = getTeamForce(self.teams.B, now)
+	local speed = (forceA - forceB) * Config.ROPE_SPEED
+	local limit = Config.ROPE_LIMIT
+	local target = math.clamp(self.ropePosition + speed * playingDt, -limit, limit)
+	local reachedLimit = math.abs(target) == limit
+	if reachedLimit and speed ~= 0 then
+		playingDt = math.min(playingDt, (target - self.ropePosition) / speed)
+	end
+
+	self.ropePosition = target
+	self.timeLeft -= playingDt
+	if reachedLimit or self.timeLeft <= 0 then
+		self.phase = "Ended"
+		self.winner = if target > 0 then "A" elseif target < 0 then "B" else "Draw"
+	end
+end
+
+return Match
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="19">
+        <Properties>
+          <string name="Name">MatchService</string>
+          <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 플레이어와 Normal 봇의 경기 진행 및 서버 상태 복제 추가
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Remotes = require(Shared.Remotes)
+local Types = require(Shared.Types)
+local BotService = require(script.Parent.BotService)
+local MashService = require(script.Parent.MashService)
+local Match = require(script.Parent.Match)
+local PuzzleService = require(script.Parent.PuzzleService)
+
+type Round = {
+	player: Player,
+	participant: Types.ParticipantState,
+	mashInput: MashService.InputState,
+	puzzleSchedule: PuzzleService.Schedule,
+	match: Match.Match,
+	replicateElapsed: number,
+	lastPhase: Types.MatchPhase?,
+	lastTimeLeft: number?,
+}
+
+local MatchService = {}
+
+local function publishState(arena: Model, round: Round)
+	local match = round.match
+	local phase = match.phase
+	local timeLeft = math.ceil(match.timeLeft)
+	local phaseChanged = round.lastPhase ~= phase
+	if not phaseChanged and round.lastTimeLeft == timeLeft then
+		return
+	end
+
+	round.lastPhase = phase
+	round.lastTimeLeft = timeLeft
+	if phaseChanged then
+		arena:SetAttribute("Phase", phase)
+	end
+	local winner = match.winner
+	local extra: Types.MatchStateExtra? = if winner then { winner = winner } else nil
+	Remotes.MatchState:FireClient(round.player, phase, timeLeft, extra)
+end
+
+function MatchService.start()
+	Players.CharacterAutoLoads = false
+
+	local arena = Instance.new("Model")
+	arena.Name = Config.ARENA_NAME
+	arena.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
+	arena:SetAttribute("RopePosition", 0)
+	arena:SetAttribute("Phase", "Waiting")
+	arena:SetAttribute("BuffUntil", 0)
+	arena.Parent = Workspace
+
+	local activeRound: Round? = nil
+	local function startRound(player: Player)
+		local participant: Types.ParticipantState = { rawTps = 0, buffUntil = 0, stunUntil = 0 }
+		local match = Match.new({ A = { participant }, B = { BotService.createNormalParticipant() } })
+		match:start()
+		local round: Round = {
+			player = player,
+			participant = participant,
+			mashInput = MashService.newInputState(),
+			puzzleSchedule = PuzzleService.newSchedule(),
+			match = match,
+			replicateElapsed = 0,
+			lastPhase = nil,
+			lastTimeLeft = nil,
+		}
+		activeRound = round
+		arena:SetAttribute("PlayerUserId", player.UserId)
+		arena:SetAttribute("RopePosition", match.ropePosition)
+		arena:SetAttribute("BuffUntil", 0)
+		publishState(arena, round)
+	end
+
+	local function startForFirstPlayer(excluded: Player?)
+		for _, player in Players:GetPlayers() do
+			if player ~= excluded then
+				startRound(player)
+				return
+			end
+		end
+	end
+
+	Remotes.MashBatch.OnServerEvent:Connect(function(player: Player, count: unknown)
+		local round = activeRound
+		if round and round.player == player and round.match.phase == "Playing" then
+			MashService.acceptBatch(round.mashInput, count, Workspace:GetServerTimeNow())
+		end
+	end)
+
+	-- 2026-11-19 경기 참가자의 퍼즐 제출과 버프 만료 시각 동기화
+	Remotes.PuzzleSubmit.OnServerEvent:Connect(function(player: Player, id: unknown, submission: unknown)
+		local round = activeRound
+		if not round or round.player ~= player or round.match.phase ~= "Playing" or typeof(id) ~= "number" then
+			return
+		end
+
+		local success, reward = PuzzleService.submit(round.participant, id, submission, Workspace:GetServerTimeNow())
+		if success ~= nil then
+			if reward == "Buff" then
+				arena:SetAttribute("BuffUntil", round.participant.buffUntil)
+			end
+			Remotes.PuzzleResult:FireClient(player, id, success, reward)
+		end
+	end)
+
+	RunService.Heartbeat:Connect(function(dt: number)
+		local round = activeRound
+		if not round or round.match.phase == "Ended" then
+			return
+		end
+
+		local now = Workspace:GetServerTimeNow()
+		local match = round.match
+		round.participant.rawTps = MashService.getRawTps(round.mashInput, now)
+		match:step(dt, now)
+		if match.phase == "Playing" then
+			local puzzle, expiredId = PuzzleService.update(round.puzzleSchedule, round.participant, now)
+			if puzzle then
+				-- 2026-11-19 서버가 판정에 사용하는 마감 시각을 퍼즐과 함께 전송
+				Remotes.PuzzleIssued:FireClient(
+					round.player, puzzle.id, puzzle.definition.kind, puzzle.displayData, Config.PUZZLE_TIMEOUT, puzzle.expiresAt
+				)
+			elseif expiredId then
+				Remotes.PuzzleResult:FireClient(round.player, expiredId, false)
+			end
+		elseif match.phase == "Ended" then
+			round.participant.activePuzzle = nil
+			round.participant.buffUntil = 0
+			arena:SetAttribute("BuffUntil", 0)
+		end
+
+		round.replicateElapsed += dt
+		if match.phase == "Ended" or round.replicateElapsed >= Config.ROPE_REPLICATE_INTERVAL then
+			round.replicateElapsed %= Config.ROPE_REPLICATE_INTERVAL
+			arena:SetAttribute("RopePosition", match.ropePosition)
+		end
+		publishState(arena, round)
+	end)
+
+	Players.PlayerAdded:Connect(function(player: Player)
+		if not activeRound then
+			startRound(player)
+		end
+	end)
+	Players.PlayerRemoving:Connect(function(player: Player)
+		local round = activeRound
+		if round and round.player == player then
+			activeRound = nil
+			arena:SetAttribute("Phase", "Waiting")
+			arena:SetAttribute("PlayerUserId", nil)
+			arena:SetAttribute("RopePosition", 0)
+			arena:SetAttribute("BuffUntil", 0)
+			startForFirstPlayer(player)
+		end
+	end)
+	startForFirstPlayer(nil)
+end
+
+return MatchService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="20">
+        <Properties>
+          <string name="Name">PuzzleService</string>
+          <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 경기 중 퍼즐 발행, 만료, 제출 판정과 버프 적용 추가
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Types = require(Shared.Types)
+local ArrowSequence = require(script.Parent.Puzzles.ArrowSequence)
+
+export type Schedule = { nextAt: number? }
+
+local rng = Random.new()
+local lastPuzzleId = 0
+local PuzzleService = {}
+
+function PuzzleService.newSchedule(): Schedule
+	return { nextAt = nil }
+end
+
+function PuzzleService.update(schedule: Schedule, participant: Types.ParticipantState, now: number): (Types.ActivePuzzle?, number?)
+	local current = participant.activePuzzle
+	if current then
+		if now >= current.expiresAt then
+			participant.activePuzzle = nil
+			return nil, current.id
+		end
+		return nil, nil
+	end
+
+	local nextAt = schedule.nextAt
+	if nextAt == nil then
+		schedule.nextAt = now + Config.PUZZLE_FIRST_DELAY
+		return nil, nil
+	end
+	if now < nextAt then
+		return nil, nil
+	end
+
+	lastPuzzleId += 1
+	local displayData, solutionInfo = ArrowSequence.generate(rng, rng:NextNumber())
+	local puzzle: Types.ActivePuzzle = {
+		id = lastPuzzleId,
+		definition = ArrowSequence,
+		displayData = displayData,
+		solutionInfo = solutionInfo,
+		issuedAt = now,
+		expiresAt = now + Config.PUZZLE_TIMEOUT,
+	}
+	participant.activePuzzle = puzzle
+	schedule.nextAt = now + rng:NextNumber(Config.PUZZLE_INTERVAL[1], Config.PUZZLE_INTERVAL[2])
+	return puzzle, nil
+end
+
+function PuzzleService.submit(participant: Types.ParticipantState, id: unknown, submission: unknown, now: number): (boolean?, Types.PuzzleReward?)
+	local puzzle = participant.activePuzzle
+	if not puzzle or id ~= puzzle.id or now >= puzzle.expiresAt then
+		return nil, nil
+	end
+
+	-- 제출 기회는 발행된 퍼즐마다 한 번이다.
+	participant.activePuzzle = nil
+	local definition = puzzle.definition
+	if now < puzzle.issuedAt + Config.PUZZLE_MIN_SOLVE_TIME
+		or not definition.validate(puzzle.displayData, puzzle.solutionInfo, submission) then
+		return false, nil
+	end
+
+	if definition.reward == "Buff" then
+		participant.buffUntil = now + Config.BUFF_DURATION
+	end
+	return true, definition.reward
+end
+
+return PuzzleService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Folder" referent="21">
+        <Properties>
+          <string name="Name">Puzzles</string>
+        </Properties>
+        <Item class="ModuleScript" referent="22">
+          <Properties>
+            <string name="Name">ArrowSequence</string>
+            <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 화살표 순서 생성 및 제출 검증 추가
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Types = require(Shared.Types)
+
+local function generate(rng: Random, difficulty: number): ({ sequence: { string } }, nil)
+	local minLength, maxLength = Config.ARROW_SEQUENCE_LENGTH[1], Config.ARROW_SEQUENCE_LENGTH[2]
+	local count = math.min(maxLength, minLength + math.floor(difficulty * (maxLength - minLength + 1)))
+	local directions = Config.ARROW_DIRECTIONS
+	local sequence: { string } = {}
+	for index = 1, count do
+		sequence[index] = directions[rng:NextInteger(1, #directions)]
+	end
+	return { sequence = sequence }, nil
+end
+
+local function validate(displayData: any, _solutionInfo: any, submission: unknown): boolean
+	if typeof(submission) ~= "table" then
+		return false
+	end
+
+	local sequence: { string } = displayData.sequence
+	local count = 0
+	for index, direction in pairs(submission) do
+		if typeof(index) ~= "number" or typeof(direction) ~= "string" or sequence[index] ~= direction then
+			return false
+		end
+		count += 1
+	end
+	return count == #sequence
+end
+
+local ArrowSequence: Types.PuzzleDef = {
+	kind = "ArrowSequence",
+	reward = "Buff",
+	generate = generate,
+	validate = validate,
+}
+
+return ArrowSequence
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="StarterPlayer" referent="23">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="24">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="Folder" referent="25">
+        <Properties>
+          <string name="Name">Client</string>
+        </Properties>
+        <Item class="LocalScript" referent="26">
+          <Properties>
+            <string name="Name">Main</string>
+            <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 클라이언트 진입점에서 공용 설정과 RemoteEvent 초기화 확인
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Remotes = require(Shared.Remotes)
+local Types = require(Shared.Types)
+
+-- 2026-11-19 서버 경기장에 줄 화면과 연타 입력 연결
+local MashController = require(script.Parent.MashController)
+local RopeView = require(script.Parent.RopeView)
+-- 2026-11-19 기존 연타 조작과 별도로 오른쪽 퍼즐 UI 시작
+local PuzzleController = require(script.Parent.PuzzleController)
+Remotes.MatchState.OnClientEvent:Connect(function(phase: Types.MatchPhase, _timeLeft: number, extra: Types.MatchStateExtra?)
+	if phase == "Ended" and extra and Config.DEBUG and RunService:IsStudio() then
+		local result = if extra.winner == "A" then "플레이어 승리" elseif extra.winner == "B" then "Normal 봇 승리" else "무승부"
+		print("[PullPanic] " .. result)
+	end
+end)
+
+local arena = Workspace:WaitForChild(Config.ARENA_NAME)
+assert(arena:IsA("Model"), "경기장은 Model이어야 합니다.")
+RopeView.start(arena)
+MashController.start(arena)
+PuzzleController.start(arena)
+
+if Config.DEBUG and RunService:IsStudio() then
+	print("[PullPanic] 클라이언트 초기화 완료")
+end
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="27">
+          <Properties>
+            <string name="Name">MashController</string>
+            <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 Space와 모바일 연타 버튼의 입력을 묶어 전송
+
+local ContextActionService = game:GetService("ContextActionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Remotes = require(Shared.Remotes)
+
+local MashController = {}
+
+local function createTouchButton(): TextButton
+	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+	assert(playerGui:IsA("PlayerGui"), "PlayerGui를 찾을 수 없습니다.")
+	playerGui.ScreenOrientation = Enum.ScreenOrientation.LandscapeSensor
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "MashControls"
+	gui.ResetOnSpawn = false
+
+	local layout = Config.MASH_BUTTON
+	local button = Instance.new("TextButton")
+	button.Name = "MashButton"
+	button.AnchorPoint = Vector2.new(0, 1)
+	button.Position = UDim2.fromScale(layout.left, 1 - layout.bottom)
+	button.Size = UDim2.fromScale(layout.width, layout.height)
+	button.Text = "연타"
+	button.TextScaled = true
+	button.Font = Enum.Font.GothamBold
+	button.TextColor3 = Color3.new(1, 1, 1)
+	button.BackgroundColor3 = Color3.fromRGB(34, 82, 164)
+	button.BorderSizePixel = 0
+	button.Visible = false
+	button.Parent = gui
+	gui.Parent = playerGui
+	return button
+end
+
+function MashController.start(arena: Model)
+	local player = Players.LocalPlayer
+	local pendingTaps = 0
+	local elapsed = 0
+	local spaceHeld = false
+	local playing = false
+	local button = if UserInputService.TouchEnabled then createTouchButton() else nil
+
+	local function updatePlaying()
+		local canMash = arena:GetAttribute("Phase") == "Playing" and arena:GetAttribute("PlayerUserId") == player.UserId
+		if canMash ~= playing then
+			playing = canMash
+			pendingTaps = 0
+			elapsed = 0
+		end
+		if button then
+			button.Visible = playing
+		end
+	end
+
+	local function queueTap()
+		if playing then
+			pendingTaps += 1
+		end
+	end
+
+	arena:GetAttributeChangedSignal("Phase"):Connect(updatePlaying)
+	arena:GetAttributeChangedSignal("PlayerUserId"):Connect(updatePlaying)
+	updatePlaying()
+	if button then
+		button.Activated:Connect(queueTap)
+	end
+
+	ContextActionService:BindActionAtPriority("PullPanicMash", function(_, state)
+		if state == Enum.UserInputState.End or state == Enum.UserInputState.Cancel then
+			spaceHeld = false
+		end
+		if UserInputService:GetFocusedTextBox() then
+			return Enum.ContextActionResult.Pass
+		end
+		if state == Enum.UserInputState.Begin and not spaceHeld then
+			spaceHeld = true
+			queueTap()
+		end
+		return Enum.ContextActionResult.Sink
+	end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Space)
+	UserInputService.WindowFocusReleased:Connect(function()
+		spaceHeld = false
+	end)
+
+	RunService.Heartbeat:Connect(function(dt: number)
+		if not playing then
+			return
+		end
+		elapsed += dt
+		if elapsed >= Config.INPUT_BATCH_INTERVAL then
+			elapsed %= Config.INPUT_BATCH_INTERVAL
+			if pendingTaps > 0 then
+				Remotes.MashBatch:FireServer(pendingTaps)
+				pendingTaps = 0
+			end
+		end
+	end)
+end
+
+return MashController
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="28">
+          <Properties>
+            <string name="Name">PuzzleController</string>
+            <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 퍼즐 표시, 제출 결과 및 서버 기준 버프 표시 추가
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Remotes = require(Shared.Remotes)
+local Types = require(Shared.Types)
+
+local renderers: { [string]: Types.PuzzleRenderer } = {
+	ArrowSequence = require(script.Parent.PuzzleRenderers.ArrowSequence),
+}
+
+type PresentedPuzzle = {
+	id: number,
+	renderer: Types.PuzzleRenderer,
+	expiresAt: number,
+	submitted: boolean,
+}
+
+local layout = Config.PUZZLE_VIEW
+local PuzzleController = {}
+
+local function addCorner(parent: GuiObject)
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, layout.cornerRadius)
+	corner.Parent = parent
+end
+
+local function createLabel(parent: Instance, name: string, color: Color3): TextLabel
+	local label = Instance.new("TextLabel")
+	label.Name = name
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.TextColor3 = color
+	label.Parent = parent
+	return label
+end
+
+function PuzzleController.start(arena: Model)
+	local player = Players.LocalPlayer
+	local playerGui = player:WaitForChild("PlayerGui")
+	assert(playerGui:IsA("PlayerGui"), "PlayerGui를 찾을 수 없습니다.")
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "PuzzleControls"
+	gui.ResetOnSpawn = false
+	local panel = Instance.new("Frame")
+	panel.Name = "PuzzlePanel"
+	panel.AnchorPoint = Vector2.new(1, 0.5)
+	panel.Position = UDim2.fromScale(1 - layout.right, layout.centerY)
+	panel.Size = UDim2.fromScale(layout.width, layout.height)
+	panel.BackgroundColor3 = Color3.fromRGB(19, 29, 44)
+	panel.Visible = false
+	panel.Parent = gui
+	addCorner(panel)
+
+	local innerWidth = 1 - 2 * layout.inset
+	local title = createLabel(panel, "Title", Color3.fromRGB(232, 240, 255))
+	title.Position = UDim2.fromScale(layout.inset, layout.titleTop)
+	title.Size = UDim2.fromScale(innerWidth, layout.titleHeight)
+	title.Text = "화살표 순서"
+
+	local body = Instance.new("Frame")
+	body.Name = "PuzzleBody"
+	body.Position = UDim2.fromScale(layout.inset, layout.bodyTop)
+	body.Size = UDim2.fromScale(innerWidth, layout.bodyHeight)
+	body.BackgroundTransparency = 1
+	body.Parent = panel
+
+	local status = createLabel(panel, "Status", Color3.fromRGB(175, 202, 236))
+	status.Position = UDim2.fromScale(layout.inset, layout.footerTop)
+	status.Size = UDim2.fromScale(innerWidth, layout.footerHeight)
+
+	local buff = createLabel(gui, "Buff", Color3.fromRGB(255, 229, 165))
+	buff.AnchorPoint = Vector2.new(1, 1)
+	buff.Position = UDim2.fromScale(1 - layout.right, 1 - layout.badgeBottom)
+	buff.Size = UDim2.fromScale(layout.width, layout.badgeHeight)
+	buff.BackgroundColor3 = Color3.fromRGB(68, 49, 19)
+	buff.BackgroundTransparency = 0
+	buff.Visible = false
+	addCorner(buff)
+	gui.Parent = playerGui
+
+	local active: PresentedPuzzle? = nil
+	local resultUntil = 0
+	local playing = false
+
+	local function clearPuzzle()
+		local puzzle = active
+		if puzzle then
+			puzzle.renderer.cleanup()
+			active = nil
+		end
+		resultUntil = 0
+		panel.Visible = false
+	end
+
+	local function showResult(message: string, now: number)
+		clearPuzzle()
+		status.Text = message
+		panel.Visible = true
+		resultUntil = now + layout.resultDuration
+	end
+
+	local function syncPlaying()
+		playing = arena:GetAttribute("Phase") == "Playing" and arena:GetAttribute("PlayerUserId") == player.UserId
+		if not playing then
+			clearPuzzle()
+			buff.Visible = false
+		end
+	end
+
+	arena:GetAttributeChangedSignal("Phase"):Connect(syncPlaying)
+	arena:GetAttributeChangedSignal("PlayerUserId"):Connect(syncPlaying)
+	syncPlaying()
+
+	-- 2026-11-19 퍼즐 수신 지연을 반영해 서버 마감 시각까지 남은 시간만 표시
+	Remotes.PuzzleIssued.OnClientEvent:Connect(function(id: number, kind: string, displayData: any, _timeout: number, expiresAt: number)
+		local renderer = renderers[kind]
+		local remaining = expiresAt - Workspace:GetServerTimeNow()
+		if not playing or not renderer or remaining <= 0 then
+			return
+		end
+
+		clearPuzzle()
+		local puzzle: PresentedPuzzle = {
+			id = id,
+			renderer = renderer,
+			expiresAt = expiresAt,
+			submitted = false,
+		}
+		active = puzzle
+		status.Text = string.format("%.1f초", remaining)
+		renderer.render(body, displayData, function(submission)
+			if active ~= puzzle or puzzle.submitted or Workspace:GetServerTimeNow() >= puzzle.expiresAt then
+				return
+			end
+			puzzle.submitted = true
+			status.Text = "판정 중"
+			Remotes.PuzzleSubmit:FireServer(puzzle.id, submission)
+		end)
+		panel.Visible = true
+	end)
+
+	Remotes.PuzzleResult.OnClientEvent:Connect(function(id: number, success: boolean)
+		local puzzle = active
+		if puzzle and puzzle.id == id then
+			local message = if success then "성공" elseif puzzle.submitted then "실패" else "시간 초과"
+			showResult(message, Workspace:GetServerTimeNow())
+		end
+	end)
+
+	RunService.Heartbeat:Connect(function()
+		if not playing then
+			return
+		end
+		local now = Workspace:GetServerTimeNow()
+		local buffUntil = arena:GetAttribute("BuffUntil")
+		local buffRemaining = if typeof(buffUntil) == "number" then buffUntil - now else 0
+		buff.Visible = buffRemaining > 0
+		if buff.Visible then
+			buff.Text = string.format("당기는 힘 ×%.1f  %.1f초", Config.BUFF_MULT, buffRemaining)
+		end
+
+		local puzzle = active
+		if puzzle then
+			if not puzzle.submitted then
+				local remaining = puzzle.expiresAt - now
+				if remaining > 0 then
+					status.Text = string.format("%.1f초", remaining)
+				else
+					showResult("시간 초과", now)
+				end
+			end
+		elseif panel.Visible and now >= resultUntil then
+			clearPuzzle()
+		end
+	end)
+end
+
+return PuzzleController
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="Folder" referent="29">
+          <Properties>
+            <string name="Name">PuzzleRenderers</string>
+          </Properties>
+          <Item class="ModuleScript" referent="30">
+            <Properties>
+              <string name="Name">ArrowSequence</string>
+              <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 화살표 순서 표시와 마우스·터치 제출 추가
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Types = require(Shared.Types)
+
+local glyphs: { [string]: string } = { Up = "↑", Right = "→", Down = "↓", Left = "←" }
+local layout = Config.PUZZLE_VIEW
+local content: Frame? = nil
+
+local function cleanup()
+	if content then
+		content:Destroy()
+		content = nil
+	end
+end
+
+local function createRow(parent: Frame, top: number, height: number): Frame
+	local row = Instance.new("Frame")
+	row.Position = UDim2.fromScale(0, top)
+	row.Size = UDim2.fromScale(1, height)
+	row.BackgroundTransparency = 1
+	row.Parent = parent
+
+	local list = Instance.new("UIListLayout")
+	list.FillDirection = Enum.FillDirection.Horizontal
+	list.SortOrder = Enum.SortOrder.LayoutOrder
+	list.Padding = UDim.new(layout.tileGap, 0)
+	list.Parent = row
+	return row
+end
+
+local function tileSize(count: number): UDim2
+	return UDim2.fromScale((1 - layout.tileGap * (count - 1)) / count, 1)
+end
+
+local function render(parent: GuiObject, displayData: any, onSubmit: (unknown) -> ())
+	cleanup()
+	local root = Instance.new("Frame")
+	root.Size = UDim2.fromScale(1, 1)
+	root.BackgroundTransparency = 1
+	root.Parent = parent
+	content = root
+
+	local sequence: { string } = displayData.sequence
+	local targetRow = createRow(root, 0, layout.sequenceHeight)
+	local labels: { TextLabel } = {}
+	for index, direction in sequence do
+		local label = Instance.new("TextLabel")
+		label.LayoutOrder = index
+		label.Size = tileSize(#sequence)
+		label.BorderSizePixel = 0
+		label.BackgroundColor3 = Color3.fromRGB(33, 48, 69)
+		label.TextColor3 = Color3.fromRGB(224, 235, 250)
+		label.Text = glyphs[direction]
+		label.TextScaled = true
+		label.Font = Enum.Font.GothamBold
+		label.Parent = targetRow
+		labels[index] = label
+	end
+	labels[1].BackgroundColor3 = Color3.fromRGB(66, 102, 156)
+
+	local submission: { string } = {}
+	local directions = Config.ARROW_DIRECTIONS
+	local buttonRow = createRow(root, layout.buttonTop, 1 - layout.buttonTop)
+	for index, direction in directions do
+		local button = Instance.new("TextButton")
+		button.Name = direction
+		button.LayoutOrder = index
+		button.Size = tileSize(#directions)
+		button.BorderSizePixel = 0
+		button.BackgroundColor3 = Color3.fromRGB(50, 82, 133)
+		button.TextColor3 = Color3.new(1, 1, 1)
+		button.Text = glyphs[direction]
+		button.TextScaled = true
+		button.Font = Enum.Font.GothamBold
+		button.Parent = buttonRow
+		button.Activated:Connect(function()
+			if #submission >= #sequence then
+				return
+			end
+			table.insert(submission, direction)
+			local position = #submission
+			labels[position].BackgroundColor3 = Color3.fromRGB(31, 43, 58)
+			labels[position].TextColor3 = Color3.fromRGB(147, 166, 191)
+			if position == #sequence then
+				onSubmit(submission)
+			else
+				labels[position + 1].BackgroundColor3 = Color3.fromRGB(66, 102, 156)
+			end
+		end)
+	end
+end
+
+local ArrowSequence: Types.PuzzleRenderer = { render = render, cleanup = cleanup }
+return ArrowSequence
+]]></string>
+            </Properties>
+          </Item>
+        </Item>
+        <Item class="ModuleScript" referent="31">
+          <Properties>
+            <string name="Name">RopeView</string>
+            <string name="Source"><![CDATA[--!strict
+-- 2026-11-19 단순 도형 경기장과 서버 줄 위치 보간 표시 추가
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+
+local RopeView = {}
+
+local function createPart(parent: Instance, name: string, size: Vector3, position: Vector3, color: Color3): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = size
+	part.Position = position
+	part.Color = color
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.Parent = parent
+	return part
+end
+
+function RopeView.start(arena: Model)
+	local view = Config.ARENA_VIEW
+	local visuals = Instance.new("Folder")
+	visuals.Name = "PullPanicArenaView"
+	visuals.Parent = Workspace
+
+	createPart(visuals, "Floor", Vector3.new(view.width, view.floorThickness, view.depth),
+		Vector3.new(0, -view.floorThickness / 2, 0), Color3.fromRGB(44, 52, 65))
+	createPart(visuals, "CenterLine", Vector3.new(view.centerLineWidth, view.centerLineWidth, view.depth),
+		Vector3.zero, Color3.fromRGB(217, 226, 233))
+	local endLineSize = Vector3.new(view.endLineWidth, view.centerLineWidth, view.depth)
+	createPart(visuals, "PlayerLine", endLineSize, Vector3.new(-view.travel, 0, 0), Color3.fromRGB(73, 147, 255))
+	createPart(visuals, "BotLine", endLineSize, Vector3.new(view.travel, 0, 0), Color3.fromRGB(255, 117, 72))
+
+	local center = Vector3.new(0, view.ropeHeight, 0)
+	local rope = createPart(visuals, "Rope", Vector3.new(view.ropeLength, view.ropeThickness, view.ropeThickness),
+		center, Color3.fromRGB(202, 154, 92))
+	local knot = createPart(visuals, "Knot", Vector3.one * view.knotSize, center, Color3.fromRGB(255, 223, 120))
+
+	local function updateCamera()
+		local camera = Workspace.CurrentCamera
+		if camera then
+			camera.CameraType = Enum.CameraType.Scriptable
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, view.cameraHeight, view.cameraDistance), Vector3.zero)
+			camera.Focus = CFrame.new(Vector3.zero)
+		end
+	end
+	Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(updateCamera)
+	updateCamera()
+
+	local function readPosition(): number
+		local value = arena:GetAttribute("RopePosition")
+		return if typeof(value) == "number" then value else 0
+	end
+	local function drawPosition(position: number)
+		local x = -position / Config.ROPE_LIMIT * view.travel
+		local centerPosition = Vector3.new(x, view.ropeHeight, 0)
+		rope.Position = centerPosition
+		knot.Position = centerPosition
+	end
+
+	local targetPosition = readPosition()
+	local shownPosition = targetPosition
+	local fromPosition = targetPosition
+	local elapsed = 0
+	drawPosition(shownPosition)
+	arena:GetAttributeChangedSignal("RopePosition"):Connect(function()
+		fromPosition = shownPosition
+		targetPosition = readPosition()
+		elapsed = 0
+	end)
+	RunService.PreRender:Connect(function(dt: number)
+		if shownPosition == targetPosition then
+			return
+		end
+		elapsed += dt
+		local alpha = math.min(elapsed / Config.ROPE_REPLICATE_INTERVAL, 1)
+		shownPosition = if alpha == 1 then targetPosition else fromPosition + (targetPosition - fromPosition) * alpha
+		drawPosition(shownPosition)
+	end)
+end
+
+return RopeView
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+</roblox>

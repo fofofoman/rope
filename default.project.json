@@ -1,0 +1,27 @@
+{
+  "name": "PullPanic",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Shared": { "$path": "src/shared" },
+      "Remotes": {
+        "$className": "Folder",
+        "MashBatch": { "$className": "RemoteEvent" },
+        "QteIssued": { "$className": "RemoteEvent" },
+        "QteResponse": { "$className": "RemoteEvent" },
+        "PuzzleIssued": { "$className": "RemoteEvent" },
+        "PuzzleSubmit": { "$className": "RemoteEvent" },
+        "PuzzleResult": { "$className": "RemoteEvent" },
+        "MatchState": { "$className": "RemoteEvent" }
+      }
+    },
+    "ServerScriptService": {
+      "Server": { "$path": "src/server" }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "Client": { "$path": "src/client" }
+      }
+    }
+  }
+}
