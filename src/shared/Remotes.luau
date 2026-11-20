@@ -21,6 +21,8 @@ local remotes: Types.RemoteEvents = {
 	PuzzleSubmit = waitForRemote("PuzzleSubmit"),
 	PuzzleResult = waitForRemote("PuzzleResult"),
 	MatchState = waitForRemote("MatchState"),
+	-- 2026-11-20 재시작 요청 Remote 참조 추가
+	MatchRestart = waitForRemote("MatchRestart"),
 }
 
 return remotes

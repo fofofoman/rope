@@ -2,7 +2,8 @@
 -- 2026-11-19 경기, 입력, 퍼즐 및 봇의 초기 밸런스 값 정의
 
 return {
-	ROUND_DURATION = 45,
+	-- 2026-11-20 경기 시간을 45초에서 30초로 단축
+	ROUND_DURATION = 30,
 	COUNTDOWN = 3,
 	ROPE_LIMIT = 100,
 	ROPE_SPEED = 2.5,
@@ -21,8 +22,9 @@ return {
 	QTE_FAIL_STUN = 0.6,
 	SWIPE_MIN_DISTANCE = 40,
 
-	PUZZLE_INTERVAL = { 8, 12 },
-	PUZZLE_TIMEOUT = 5,
+	-- 2026-11-20 30초 경기에서 긴장감이 유지되도록 퍼즐 간격과 제한 시간을 단축
+	PUZZLE_INTERVAL = { 5, 8 },
+	PUZZLE_TIMEOUT = 4,
 	PUZZLE_MIN_SOLVE_TIME = 0.6,
 	PUZZLE_ACTIVE_MASH_MULT = 1.0,
 	BUFF_MULT = 1.5,
@@ -68,6 +70,21 @@ return {
 		sequenceHeight = 0.42, buttonTop = 0.54, tileGap = 0.035,
 		cornerRadius = 8, badgeBottom = 0.08, badgeHeight = 0.1, resultDuration = 1,
 	},
+
+	-- 2026-11-20 HUD, 결과 화면, 재시작 요청 제한, 디버그 강제 전송 설정 추가
+	HUD_VIEW = {
+		timerTop = 0.02, timerWidth = 0.14, timerHeight = 0.09,
+		barTop = 0.12, barWidth = 0.5, barHeight = 0.035, markerWidth = 0.008,
+		barLabelTop = 0.16, barLabelHeight = 0.04, barSmoothing = 12,
+		urgentSeconds = 5,
+		countdownWidth = 0.4, countdownHeight = 0.3, startShowDuration = 0.8,
+		resultWidth = 0.36, resultHeight = 0.42, resultTitleTop = 0.1, resultTitleHeight = 0.36,
+		restartTop = 0.62, restartWidth = 0.7, restartHeight = 0.22,
+		cornerRadius = 8, overlayTransparency = 0.45, displayOrder = 10,
+		debugLeft = 0.01, debugTop = 0.02, debugWidth = 0.26, debugHeight = 0.24, debugTextSize = 16,
+	},
+	RESTART_MIN_INTERVAL = 0.5,
+	DEBUG_FLOOD = { key = Enum.KeyCode.F, tapsPerBatch = 10 },
 
 	DEBUG = true,
 }

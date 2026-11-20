@@ -12,7 +12,8 @@
         "PuzzleIssued": { "$className": "RemoteEvent" },
         "PuzzleSubmit": { "$className": "RemoteEvent" },
         "PuzzleResult": { "$className": "RemoteEvent" },
-        "MatchState": { "$className": "RemoteEvent" }
+        "MatchState": { "$className": "RemoteEvent" },
+        "MatchRestart": { "$className": "RemoteEvent" }
       }
     },
     "ServerScriptService": {

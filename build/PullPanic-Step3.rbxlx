@@ -14,47 +14,53 @@
       </Item>
       <Item class="RemoteEvent" referent="3">
         <Properties>
-          <string name="Name">MatchState</string>
+          <string name="Name">MatchRestart</string>
         </Properties>
       </Item>
       <Item class="RemoteEvent" referent="4">
         <Properties>
-          <string name="Name">PuzzleIssued</string>
+          <string name="Name">MatchState</string>
         </Properties>
       </Item>
       <Item class="RemoteEvent" referent="5">
         <Properties>
-          <string name="Name">PuzzleResult</string>
+          <string name="Name">PuzzleIssued</string>
         </Properties>
       </Item>
       <Item class="RemoteEvent" referent="6">
         <Properties>
-          <string name="Name">PuzzleSubmit</string>
+          <string name="Name">PuzzleResult</string>
         </Properties>
       </Item>
       <Item class="RemoteEvent" referent="7">
         <Properties>
-          <string name="Name">QteIssued</string>
+          <string name="Name">PuzzleSubmit</string>
         </Properties>
       </Item>
       <Item class="RemoteEvent" referent="8">
+        <Properties>
+          <string name="Name">QteIssued</string>
+        </Properties>
+      </Item>
+      <Item class="RemoteEvent" referent="9">
         <Properties>
           <string name="Name">QteResponse</string>
         </Properties>
       </Item>
     </Item>
-    <Item class="Folder" referent="9">
+    <Item class="Folder" referent="10">
       <Properties>
         <string name="Name">Shared</string>
       </Properties>
-      <Item class="ModuleScript" referent="10">
+      <Item class="ModuleScript" referent="11">
         <Properties>
           <string name="Name">Config</string>
           <string name="Source"><![CDATA[--!strict
 -- 2026-11-19 경기, 입력, 퍼즐 및 봇의 초기 밸런스 값 정의
 
 return {
-	ROUND_DURATION = 45,
+	-- 2026-11-20 경기 시간을 45초에서 30초로 단축
+	ROUND_DURATION = 30,
 	COUNTDOWN = 3,
 	ROPE_LIMIT = 100,
 	ROPE_SPEED = 2.5,
@@ -73,8 +79,9 @@ return {
 	QTE_FAIL_STUN = 0.6,
 	SWIPE_MIN_DISTANCE = 40,
 
-	PUZZLE_INTERVAL = { 8, 12 },
-	PUZZLE_TIMEOUT = 5,
+	-- 2026-11-20 30초 경기에서 긴장감이 유지되도록 퍼즐 간격과 제한 시간을 단축
+	PUZZLE_INTERVAL = { 5, 8 },
+	PUZZLE_TIMEOUT = 4,
 	PUZZLE_MIN_SOLVE_TIME = 0.6,
 	PUZZLE_ACTIVE_MASH_MULT = 1.0,
 	BUFF_MULT = 1.5,
@@ -121,12 +128,27 @@ return {
 		cornerRadius = 8, badgeBottom = 0.08, badgeHeight = 0.1, resultDuration = 1,
 	},
 
+	-- 2026-11-20 HUD, 결과 화면, 재시작 요청 제한, 디버그 강제 전송 설정 추가
+	HUD_VIEW = {
+		timerTop = 0.02, timerWidth = 0.14, timerHeight = 0.09,
+		barTop = 0.12, barWidth = 0.5, barHeight = 0.035, markerWidth = 0.008,
+		barLabelTop = 0.16, barLabelHeight = 0.04, barSmoothing = 12,
+		urgentSeconds = 5,
+		countdownWidth = 0.4, countdownHeight = 0.3, startShowDuration = 0.8,
+		resultWidth = 0.36, resultHeight = 0.42, resultTitleTop = 0.1, resultTitleHeight = 0.36,
+		restartTop = 0.62, restartWidth = 0.7, restartHeight = 0.22,
+		cornerRadius = 8, overlayTransparency = 0.45, displayOrder = 10,
+		debugLeft = 0.01, debugTop = 0.02, debugWidth = 0.26, debugHeight = 0.24, debugTextSize = 16,
+	},
+	RESTART_MIN_INTERVAL = 0.5,
+	DEBUG_FLOOD = { key = Enum.KeyCode.F, tapsPerBatch = 10 },
+
 	DEBUG = true,
 }
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="11">
+      <Item class="ModuleScript" referent="12">
         <Properties>
           <string name="Name">Remotes</string>
           <string name="Source"><![CDATA[--!strict
@@ -152,13 +174,15 @@ local remotes: Types.RemoteEvents = {
 	PuzzleSubmit = waitForRemote("PuzzleSubmit"),
 	PuzzleResult = waitForRemote("PuzzleResult"),
 	MatchState = waitForRemote("MatchState"),
+	-- 2026-11-20 재시작 요청 Remote 참조 추가
+	MatchRestart = waitForRemote("MatchRestart"),
 }
 
 return remotes
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="12">
+      <Item class="ModuleScript" referent="13">
         <Properties>
           <string name="Name">Types</string>
           <string name="Source"><![CDATA[--!strict
@@ -172,6 +196,8 @@ export type RemoteEvents = {
 	PuzzleSubmit: RemoteEvent,
 	PuzzleResult: RemoteEvent,
 	MatchState: RemoteEvent,
+	-- 2026-11-20 경기 종료 후 재시작 요청 Remote 추가
+	MatchRestart: RemoteEvent,
 }
 
 -- 2026-11-19 경기 상태와 참가자 타입 추가
@@ -215,15 +241,15 @@ return {}
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="13">
+  <Item class="ServerScriptService" referent="14">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Folder" referent="14">
+    <Item class="Folder" referent="15">
       <Properties>
         <string name="Name">Server</string>
       </Properties>
-      <Item class="ModuleScript" referent="15">
+      <Item class="ModuleScript" referent="16">
         <Properties>
           <string name="Name">BotService</string>
           <string name="Source"><![CDATA[--!strict
@@ -244,7 +270,7 @@ return BotService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="16">
+      <Item class="Script" referent="17">
         <Properties>
           <string name="Name">Main</string>
           <token name="RunContext">0</token>
@@ -267,7 +293,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="17">
+      <Item class="ModuleScript" referent="18">
         <Properties>
           <string name="Name">MashService</string>
           <string name="Source"><![CDATA[--!strict
@@ -346,7 +372,7 @@ return MashService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="18">
+      <Item class="ModuleScript" referent="19">
         <Properties>
           <string name="Name">Match</string>
           <string name="Source"><![CDATA[--!strict
@@ -398,6 +424,11 @@ local function getTeamForce(participants: { Types.ParticipantState }, now: numbe
 	return force
 end
 
+-- 2026-11-20 디버그 HUD용 양 팀 힘 조회 추가
+function Match.getForces(self: Match, now: number): (number, number)
+	return getTeamForce(self.teams.A, now), getTeamForce(self.teams.B, now)
+end
+
 function Match.step(self: Match, dt: number, now: number): ()
 	if self.phase == "Countdown" then
 		self.timeLeft -= dt
@@ -436,7 +467,7 @@ return Match
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="19">
+      <Item class="ModuleScript" referent="20">
         <Properties>
           <string name="Name">MatchService</string>
           <string name="Source"><![CDATA[--!strict
@@ -480,10 +511,15 @@ local function publishState(arena: Model, round: Round)
 
 	round.lastPhase = phase
 	round.lastTimeLeft = timeLeft
+	local winner = match.winner
 	if phaseChanged then
+		-- 2026-11-20 HUD가 늦게 로드돼도 동기화되도록 단계 종료 시각과 승자를 Attribute로 복제
+		-- Phase 변경 시점에 Winner가 이미 있도록 Phase보다 먼저 설정한다.
+		local hasTimer = phase == "Countdown" or phase == "Playing"
+		arena:SetAttribute("PhaseEndsAt", if hasTimer then Workspace:GetServerTimeNow() + match.timeLeft else 0)
+		arena:SetAttribute("Winner", winner)
 		arena:SetAttribute("Phase", phase)
 	end
-	local winner = match.winner
 	local extra: Types.MatchStateExtra? = if winner then { winner = winner } else nil
 	Remotes.MatchState:FireClient(round.player, phase, timeLeft, extra)
 end
@@ -500,6 +536,7 @@ function MatchService.start()
 	arena.Parent = Workspace
 
 	local activeRound: Round? = nil
+	local lastRestartAt = 0
 	local function startRound(player: Player)
 		local participant: Types.ParticipantState = { rawTps = 0, buffUntil = 0, stunUntil = 0 }
 		local match = Match.new({ A = { participant }, B = { BotService.createNormalParticipant() } })
@@ -518,6 +555,7 @@ function MatchService.start()
 		arena:SetAttribute("PlayerUserId", player.UserId)
 		arena:SetAttribute("RopePosition", match.ropePosition)
 		arena:SetAttribute("BuffUntil", 0)
+		arena:SetAttribute("Winner", nil)
 		publishState(arena, round)
 	end
 
@@ -535,6 +573,21 @@ function MatchService.start()
 		if round and round.player == player and round.match.phase == "Playing" then
 			MashService.acceptBatch(round.mashInput, count, Workspace:GetServerTimeNow())
 		end
+	end)
+
+	-- 2026-11-20 경기 종료 후 해당 플레이어의 재시작 요청만 짧은 간격 제한을 두고 처리
+	Remotes.MatchRestart.OnServerEvent:Connect(function(player: Player)
+		local round = activeRound
+		if not round or round.player ~= player or round.match.phase ~= "Ended" then
+			return
+		end
+
+		local now = os.clock()
+		if now - lastRestartAt < Config.RESTART_MIN_INTERVAL then
+			return
+		end
+		lastRestartAt = now
+		startRound(player)
 	end)
 
 	-- 2026-11-19 경기 참가자의 퍼즐 제출과 버프 만료 시각 동기화
@@ -583,6 +636,16 @@ function MatchService.start()
 		if match.phase == "Ended" or round.replicateElapsed >= Config.ROPE_REPLICATE_INTERVAL then
 			round.replicateElapsed %= Config.ROPE_REPLICATE_INTERVAL
 			arena:SetAttribute("RopePosition", match.ropePosition)
+			-- 2026-11-20 디버그 HUD용 수치 복제 (소수 첫째 자리 반올림으로 불필요한 갱신 방지)
+			if Config.DEBUG then
+				local forceA, forceB = match:getForces(now)
+				local participant = round.participant
+				arena:SetAttribute("DebugRawTps", math.round(participant.rawTps * 10) / 10)
+				arena:SetAttribute("DebugForce", math.round(MashService.getEffectiveForce(participant, now) * 10) / 10)
+				arena:SetAttribute("DebugForceA", math.round(forceA * 10) / 10)
+				arena:SetAttribute("DebugForceB", math.round(forceB * 10) / 10)
+				arena:SetAttribute("DebugStunned", participant.stunUntil > now)
+			end
 		end
 		publishState(arena, round)
 	end)
@@ -610,7 +673,7 @@ return MatchService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="20">
+      <Item class="ModuleScript" referent="21">
         <Properties>
           <string name="Name">PuzzleService</string>
           <string name="Source"><![CDATA[--!strict
@@ -690,11 +753,11 @@ return PuzzleService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="21">
+      <Item class="Folder" referent="22">
         <Properties>
           <string name="Name">Puzzles</string>
         </Properties>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="23">
           <Properties>
             <string name="Name">ArrowSequence</string>
             <string name="Source"><![CDATA[--!strict
@@ -746,19 +809,271 @@ return ArrowSequence
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="23">
+  <Item class="StarterPlayer" referent="24">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="24">
+    <Item class="StarterPlayerScripts" referent="25">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="25">
+      <Item class="Folder" referent="26">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="LocalScript" referent="26">
+        <Item class="ModuleScript" referent="27">
+          <Properties>
+            <string name="Name">HudController</string>
+            <string name="Source"><![CDATA[--!strict
+-- 2026-11-20 타이머, 줄 위치 바, 카운트다운, 결과 화면, 재시작 버튼, 디버그 HUD 추가
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Remotes = require(Shared.Remotes)
+
+local layout = Config.HUD_VIEW
+local HudController = {}
+
+local function addCorner(parent: GuiObject)
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, layout.cornerRadius)
+	corner.Parent = parent
+end
+
+local function createFrame(parent: Instance, name: string, color: Color3): Frame
+	local frame = Instance.new("Frame")
+	frame.Name = name
+	frame.BackgroundColor3 = color
+	frame.BorderSizePixel = 0
+	frame.Parent = parent
+	return frame
+end
+
+local function createLabel(parent: Instance, name: string, color: Color3): TextLabel
+	local label = Instance.new("TextLabel")
+	label.Name = name
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.TextColor3 = color
+	label.Parent = parent
+	return label
+end
+
+local function createDebugLabel(parent: Instance): TextLabel
+	local label = createLabel(parent, "Debug", Color3.fromRGB(190, 255, 190))
+	label.TextScaled = false
+	label.TextSize = layout.debugTextSize
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextYAlignment = Enum.TextYAlignment.Top
+	label.BackgroundColor3 = Color3.new(0, 0, 0)
+	label.BackgroundTransparency = 0.5
+	label.Position = UDim2.fromScale(layout.debugLeft, layout.debugTop)
+	label.Size = UDim2.fromScale(layout.debugWidth, layout.debugHeight)
+	return label
+end
+
+function HudController.start(arena: Model)
+	local player = Players.LocalPlayer
+	local playerGui = player:WaitForChild("PlayerGui")
+	assert(playerGui:IsA("PlayerGui"), "PlayerGui를 찾을 수 없습니다.")
+
+	local function readNumber(name: string, fallback: number): number
+		local value = arena:GetAttribute(name)
+		return if typeof(value) == "number" then value else fallback
+	end
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "PullPanicHud"
+	gui.ResetOnSpawn = false
+	gui.DisplayOrder = layout.displayOrder
+
+	-- 상단: 타이머와 줄 위치 바 (왼쪽 = 플레이어, 오른쪽 = 봇. 경기장 배치와 동일)
+	local timerColor = Color3.fromRGB(240, 246, 255)
+	local timerUrgentColor = Color3.fromRGB(255, 96, 96)
+	local timer = createLabel(gui, "Timer", timerColor)
+	timer.AnchorPoint = Vector2.new(0.5, 0)
+	timer.Position = UDim2.fromScale(0.5, layout.timerTop)
+	timer.Size = UDim2.fromScale(layout.timerWidth, layout.timerHeight)
+
+	local bar = createFrame(gui, "RopeBar", Color3.fromRGB(19, 29, 44))
+	bar.AnchorPoint = Vector2.new(0.5, 0)
+	bar.Position = UDim2.fromScale(0.5, layout.barTop)
+	bar.Size = UDim2.fromScale(layout.barWidth, layout.barHeight)
+	local playerSide = createFrame(bar, "PlayerSide", Color3.fromRGB(73, 147, 255))
+	playerSide.Size = UDim2.fromScale(0.5, 1)
+	local botSide = createFrame(bar, "BotSide", Color3.fromRGB(255, 117, 72))
+	botSide.Position = UDim2.fromScale(0.5, 0)
+	botSide.Size = UDim2.fromScale(0.5, 1)
+	local marker = createFrame(bar, "Marker", Color3.new(1, 1, 1))
+	marker.AnchorPoint = Vector2.new(0.5, 0.5)
+	marker.Size = UDim2.fromScale(layout.markerWidth, 1.8)
+
+	local barLeft = 0.5 - layout.barWidth / 2
+	local playerTag = createLabel(gui, "PlayerTag", Color3.fromRGB(73, 147, 255))
+	playerTag.Position = UDim2.fromScale(barLeft, layout.barLabelTop)
+	playerTag.Size = UDim2.fromScale(layout.barWidth / 2, layout.barLabelHeight)
+	playerTag.TextXAlignment = Enum.TextXAlignment.Left
+	playerTag.Text = "플레이어"
+	local botTag = createLabel(gui, "BotTag", Color3.fromRGB(255, 117, 72))
+	botTag.Position = UDim2.fromScale(0.5, layout.barLabelTop)
+	botTag.Size = UDim2.fromScale(layout.barWidth / 2, layout.barLabelHeight)
+	botTag.TextXAlignment = Enum.TextXAlignment.Right
+	botTag.Text = "Normal 봇"
+
+	-- 중앙: 카운트다운 / START
+	local countdown = createLabel(gui, "Countdown", Color3.fromRGB(255, 229, 165))
+	countdown.AnchorPoint = Vector2.new(0.5, 0.5)
+	countdown.Position = UDim2.fromScale(0.5, 0.5)
+	countdown.Size = UDim2.fromScale(layout.countdownWidth, layout.countdownHeight)
+	countdown.Visible = false
+
+	-- 결과 화면과 재시작 버튼
+	local overlay = createFrame(gui, "ResultOverlay", Color3.new(0, 0, 0))
+	overlay.Size = UDim2.fromScale(1, 1)
+	overlay.BackgroundTransparency = layout.overlayTransparency
+	overlay.Active = true
+	overlay.Visible = false
+	local resultPanel = createFrame(overlay, "ResultPanel", Color3.fromRGB(19, 29, 44))
+	resultPanel.AnchorPoint = Vector2.new(0.5, 0.5)
+	resultPanel.Position = UDim2.fromScale(0.5, 0.5)
+	resultPanel.Size = UDim2.fromScale(layout.resultWidth, layout.resultHeight)
+	addCorner(resultPanel)
+	local resultTitle = createLabel(resultPanel, "Title", Color3.new(1, 1, 1))
+	resultTitle.AnchorPoint = Vector2.new(0.5, 0)
+	resultTitle.Position = UDim2.fromScale(0.5, layout.resultTitleTop)
+	resultTitle.Size = UDim2.fromScale(layout.restartWidth, layout.resultTitleHeight)
+
+	local restart = Instance.new("TextButton")
+	restart.Name = "RestartButton"
+	restart.AnchorPoint = Vector2.new(0.5, 0)
+	restart.Position = UDim2.fromScale(0.5, layout.restartTop)
+	restart.Size = UDim2.fromScale(layout.restartWidth, layout.restartHeight)
+	restart.Font = Enum.Font.GothamBold
+	restart.TextScaled = true
+	restart.TextColor3 = Color3.new(1, 1, 1)
+	restart.BackgroundColor3 = Color3.fromRGB(34, 82, 164)
+	restart.BorderSizePixel = 0
+	restart.Parent = resultPanel
+	addCorner(restart)
+
+	local debugLabel: TextLabel? = if Config.DEBUG then createDebugLabel(gui) else nil
+	gui.Parent = playerGui
+
+	local function resetRestart()
+		restart.Active = true
+		restart.Text = "다시 시작"
+	end
+	resetRestart()
+
+	restart.Activated:Connect(function()
+		if not restart.Active then
+			return
+		end
+		restart.Active = false
+		restart.Text = "대기 중..."
+		Remotes.MatchRestart:FireServer()
+		-- 서버가 요청을 거절해도 결과 화면에서 다시 누를 수 있게 복구
+		task.delay(Config.RESTART_MIN_INTERVAL * 2, resetRestart)
+	end)
+
+	local function showResult(phase: unknown)
+		local ended = phase == "Ended"
+		overlay.Visible = ended
+		resetRestart()
+		if not ended then
+			return
+		end
+
+		local winner = arena:GetAttribute("Winner")
+		if winner == "A" then
+			resultTitle.Text = "승리!"
+			resultTitle.TextColor3 = Color3.fromRGB(255, 223, 120)
+		elseif winner == "B" then
+			resultTitle.Text = "패배"
+			resultTitle.TextColor3 = Color3.fromRGB(255, 117, 72)
+		else
+			resultTitle.Text = "무승부"
+			resultTitle.TextColor3 = Color3.fromRGB(200, 210, 225)
+		end
+	end
+
+	local lastPhase: unknown = nil
+	local startShownUntil = 0
+	local lastDebugText = ""
+	local shownPosition = readNumber("RopePosition", 0)
+
+	RunService.PreRender:Connect(function(dt: number)
+		local mine = arena:GetAttribute("PlayerUserId") == player.UserId
+		gui.Enabled = mine
+		if not mine then
+			return
+		end
+
+		local phase = arena:GetAttribute("Phase")
+		local now = Workspace:GetServerTimeNow()
+		local remaining = math.max(readNumber("PhaseEndsAt", 0) - now, 0)
+
+		if phase ~= lastPhase then
+			lastPhase = phase
+			if phase == "Playing" then
+				startShownUntil = now + layout.startShowDuration
+			end
+			showResult(phase)
+		end
+
+		-- 타이머: 경기 종료 후에는 마지막 표시값을 유지
+		if phase == "Playing" then
+			timer.Text = tostring(math.ceil(remaining))
+			timer.TextColor3 = if remaining <= layout.urgentSeconds then timerUrgentColor else timerColor
+		elseif phase ~= "Ended" then
+			timer.Text = tostring(Config.ROUND_DURATION)
+			timer.TextColor3 = timerColor
+		end
+
+		if phase == "Countdown" then
+			countdown.Text = tostring(math.max(math.ceil(remaining), 1))
+			countdown.Visible = true
+		elseif phase == "Playing" and now < startShownUntil then
+			countdown.Text = "START!"
+			countdown.Visible = true
+		else
+			countdown.Visible = false
+		end
+
+		-- 줄 위치 바: 서버 값(0.1초 간격)을 부드럽게 따라간다. 줄이 왼쪽(플레이어)으로 갈수록 마커도 왼쪽.
+		local target = readNumber("RopePosition", 0)
+		shownPosition += (target - shownPosition) * math.min(dt * layout.barSmoothing, 1)
+		marker.Position = UDim2.fromScale(0.5 - shownPosition / (2 * Config.ROPE_LIMIT), 0.5)
+
+		local label = debugLabel
+		if label then
+			local buffRemaining = readNumber("BuffUntil", 0) - now
+			local buffText = if buffRemaining > 0 then string.format("x%.1f (%.1f초)", Config.BUFF_MULT, buffRemaining) else "없음"
+			local stunText = if arena:GetAttribute("DebugStunned") == true then "스턴" else "없음"
+			local text = string.format(
+				"rawTps %.1f\n내 유효 힘 %.1f\n팀A %.1f / 팀B %.1f\n버프 %s / 스턴 %s",
+				readNumber("DebugRawTps", 0), readNumber("DebugForce", 0),
+				readNumber("DebugForceA", 0), readNumber("DebugForceB", 0), buffText, stunText
+			)
+			if text ~= lastDebugText then
+				lastDebugText = text
+				label.Text = text
+			end
+		end
+	end)
+end
+
+return HudController
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="LocalScript" referent="28">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[--!strict
@@ -778,6 +1093,9 @@ local MashController = require(script.Parent.MashController)
 local RopeView = require(script.Parent.RopeView)
 -- 2026-11-19 기존 연타 조작과 별도로 오른쪽 퍼즐 UI 시작
 local PuzzleController = require(script.Parent.PuzzleController)
+-- 2026-11-20 HUD와 모바일 기본 터치 컨트롤 숨김 연결
+local HudController = require(script.Parent.HudController)
+local MobileLayout = require(script.Parent.MobileLayout)
 Remotes.MatchState.OnClientEvent:Connect(function(phase: Types.MatchPhase, _timeLeft: number, extra: Types.MatchStateExtra?)
 	if phase == "Ended" and extra and Config.DEBUG and RunService:IsStudio() then
 		local result = if extra.winner == "A" then "플레이어 승리" elseif extra.winner == "B" then "Normal 봇 승리" else "무승부"
@@ -790,6 +1108,8 @@ assert(arena:IsA("Model"), "경기장은 Model이어야 합니다.")
 RopeView.start(arena)
 MashController.start(arena)
 PuzzleController.start(arena)
+MobileLayout.start()
+HudController.start(arena)
 
 if Config.DEBUG and RunService:IsStudio() then
 	print("[PullPanic] 클라이언트 초기화 완료")
@@ -797,7 +1117,7 @@ end
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="27">
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">MashController</string>
             <string name="Source"><![CDATA[--!strict
@@ -848,6 +1168,8 @@ function MashController.start(arena: Model)
 	local elapsed = 0
 	local spaceHeld = false
 	local playing = false
+	-- 2026-11-20 디버그 전용: 키를 누르는 동안 한도를 넘는 탭을 강제로 전송해 서버 제한을 확인
+	local floodHeld = false
 	local button = if UserInputService.TouchEnabled then createTouchButton() else nil
 
 	local function updatePlaying()
@@ -890,7 +1212,21 @@ function MashController.start(arena: Model)
 	end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Space)
 	UserInputService.WindowFocusReleased:Connect(function()
 		spaceHeld = false
+		floodHeld = false
 	end)
+
+	if Config.DEBUG and RunService:IsStudio() then
+		UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+			if not processed and input.KeyCode == Config.DEBUG_FLOOD.key then
+				floodHeld = true
+			end
+		end)
+		UserInputService.InputEnded:Connect(function(input: InputObject)
+			if input.KeyCode == Config.DEBUG_FLOOD.key then
+				floodHeld = false
+			end
+		end)
+	end
 
 	RunService.Heartbeat:Connect(function(dt: number)
 		if not playing then
@@ -899,6 +1235,9 @@ function MashController.start(arena: Model)
 		elapsed += dt
 		if elapsed >= Config.INPUT_BATCH_INTERVAL then
 			elapsed %= Config.INPUT_BATCH_INTERVAL
+			if floodHeld then
+				pendingTaps += Config.DEBUG_FLOOD.tapsPerBatch
+			end
 			if pendingTaps > 0 then
 				Remotes.MashBatch:FireServer(pendingTaps)
 				pendingTaps = 0
@@ -911,7 +1250,46 @@ return MashController
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="28">
+        <Item class="ModuleScript" referent="30">
+          <Properties>
+            <string name="Name">MobileLayout</string>
+            <string name="Source"><![CDATA[--!strict
+-- 2026-11-20 모바일에서 로블록스 기본 터치 컨트롤(썸스틱, 점프 버튼) 숨김
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+
+local MobileLayout = {}
+
+function MobileLayout.start()
+	if not UserInputService.TouchEnabled then
+		return
+	end
+
+	-- PlayerModule 로드를 기다려야 하므로 별도 스레드에서 처리한다.
+	task.spawn(function()
+		local playerScripts = Players.LocalPlayer:WaitForChild("PlayerScripts")
+		local moduleScript = playerScripts:WaitForChild("PlayerModule")
+		if not moduleScript:IsA("ModuleScript") then
+			warn("[PullPanic] PlayerModule을 찾을 수 없어 기본 터치 컨트롤을 숨기지 못했습니다.")
+			return
+		end
+
+		local ok, result = pcall(function()
+			local playerModule: any = require(moduleScript)
+			playerModule:GetControls():Disable()
+		end)
+		if not ok then
+			warn("[PullPanic] 기본 터치 컨트롤을 숨기지 못했습니다: " .. tostring(result))
+		end
+	end)
+end
+
+return MobileLayout
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="31">
           <Properties>
             <string name="Name">PuzzleController</string>
             <string name="Source"><![CDATA[--!strict
@@ -1104,11 +1482,11 @@ return PuzzleController
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="29">
+        <Item class="Folder" referent="32">
           <Properties>
             <string name="Name">PuzzleRenderers</string>
           </Properties>
-          <Item class="ModuleScript" referent="30">
+          <Item class="ModuleScript" referent="33">
             <Properties>
               <string name="Name">ArrowSequence</string>
               <string name="Source"><![CDATA[--!strict
@@ -1213,7 +1591,7 @@ return ArrowSequence
             </Properties>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="31">
+        <Item class="ModuleScript" referent="34">
           <Properties>
             <string name="Name">RopeView</string>
             <string name="Source"><![CDATA[--!strict

@@ -39,10 +39,15 @@ local function publishState(arena: Model, round: Round)
 
 	round.lastPhase = phase
 	round.lastTimeLeft = timeLeft
+	local winner = match.winner
 	if phaseChanged then
+		-- 2026-11-20 HUD가 늦게 로드돼도 동기화되도록 단계 종료 시각과 승자를 Attribute로 복제
+		-- Phase 변경 시점에 Winner가 이미 있도록 Phase보다 먼저 설정한다.
+		local hasTimer = phase == "Countdown" or phase == "Playing"
+		arena:SetAttribute("PhaseEndsAt", if hasTimer then Workspace:GetServerTimeNow() + match.timeLeft else 0)
+		arena:SetAttribute("Winner", winner)
 		arena:SetAttribute("Phase", phase)
 	end
-	local winner = match.winner
 	local extra: Types.MatchStateExtra? = if winner then { winner = winner } else nil
 	Remotes.MatchState:FireClient(round.player, phase, timeLeft, extra)
 end
@@ -59,6 +64,7 @@ function MatchService.start()
 	arena.Parent = Workspace
 
 	local activeRound: Round? = nil
+	local lastRestartAt = 0
 	local function startRound(player: Player)
 		local participant: Types.ParticipantState = { rawTps = 0, buffUntil = 0, stunUntil = 0 }
 		local match = Match.new({ A = { participant }, B = { BotService.createNormalParticipant() } })
@@ -77,6 +83,7 @@ function MatchService.start()
 		arena:SetAttribute("PlayerUserId", player.UserId)
 		arena:SetAttribute("RopePosition", match.ropePosition)
 		arena:SetAttribute("BuffUntil", 0)
+		arena:SetAttribute("Winner", nil)
 		publishState(arena, round)
 	end
 
@@ -94,6 +101,21 @@ function MatchService.start()
 		if round and round.player == player and round.match.phase == "Playing" then
 			MashService.acceptBatch(round.mashInput, count, Workspace:GetServerTimeNow())
 		end
+	end)
+
+	-- 2026-11-20 경기 종료 후 해당 플레이어의 재시작 요청만 짧은 간격 제한을 두고 처리
+	Remotes.MatchRestart.OnServerEvent:Connect(function(player: Player)
+		local round = activeRound
+		if not round or round.player ~= player or round.match.phase ~= "Ended" then
+			return
+		end
+
+		local now = os.clock()
+		if now - lastRestartAt < Config.RESTART_MIN_INTERVAL then
+			return
+		end
+		lastRestartAt = now
+		startRound(player)
 	end)
 
 	-- 2026-11-19 경기 참가자의 퍼즐 제출과 버프 만료 시각 동기화
@@ -142,6 +164,16 @@ function MatchService.start()
 		if match.phase == "Ended" or round.replicateElapsed >= Config.ROPE_REPLICATE_INTERVAL then
 			round.replicateElapsed %= Config.ROPE_REPLICATE_INTERVAL
 			arena:SetAttribute("RopePosition", match.ropePosition)
+			-- 2026-11-20 디버그 HUD용 수치 복제 (소수 첫째 자리 반올림으로 불필요한 갱신 방지)
+			if Config.DEBUG then
+				local forceA, forceB = match:getForces(now)
+				local participant = round.participant
+				arena:SetAttribute("DebugRawTps", math.round(participant.rawTps * 10) / 10)
+				arena:SetAttribute("DebugForce", math.round(MashService.getEffectiveForce(participant, now) * 10) / 10)
+				arena:SetAttribute("DebugForceA", math.round(forceA * 10) / 10)
+				arena:SetAttribute("DebugForceB", math.round(forceB * 10) / 10)
+				arena:SetAttribute("DebugStunned", participant.stunUntil > now)
+			end
 		end
 		publishState(arena, round)
 	end)

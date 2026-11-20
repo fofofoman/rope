@@ -9,6 +9,8 @@ export type RemoteEvents = {
 	PuzzleSubmit: RemoteEvent,
 	PuzzleResult: RemoteEvent,
 	MatchState: RemoteEvent,
+	-- 2026-11-20 경기 종료 후 재시작 요청 Remote 추가
+	MatchRestart: RemoteEvent,
 }
 
 -- 2026-11-19 경기 상태와 참가자 타입 추가

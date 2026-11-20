@@ -46,6 +46,8 @@ function MashController.start(arena: Model)
 	local elapsed = 0
 	local spaceHeld = false
 	local playing = false
+	-- 2026-11-20 디버그 전용: 키를 누르는 동안 한도를 넘는 탭을 강제로 전송해 서버 제한을 확인
+	local floodHeld = false
 	local button = if UserInputService.TouchEnabled then createTouchButton() else nil
 
 	local function updatePlaying()
@@ -88,7 +90,21 @@ function MashController.start(arena: Model)
 	end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Space)
 	UserInputService.WindowFocusReleased:Connect(function()
 		spaceHeld = false
+		floodHeld = false
 	end)
+
+	if Config.DEBUG and RunService:IsStudio() then
+		UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+			if not processed and input.KeyCode == Config.DEBUG_FLOOD.key then
+				floodHeld = true
+			end
+		end)
+		UserInputService.InputEnded:Connect(function(input: InputObject)
+			if input.KeyCode == Config.DEBUG_FLOOD.key then
+				floodHeld = false
+			end
+		end)
+	end
 
 	RunService.Heartbeat:Connect(function(dt: number)
 		if not playing then
@@ -97,6 +113,9 @@ function MashController.start(arena: Model)
 		elapsed += dt
 		if elapsed >= Config.INPUT_BATCH_INTERVAL then
 			elapsed %= Config.INPUT_BATCH_INTERVAL
+			if floodHeld then
+				pendingTaps += Config.DEBUG_FLOOD.tapsPerBatch
+			end
 			if pendingTaps > 0 then
 				Remotes.MashBatch:FireServer(pendingTaps)
 				pendingTaps = 0

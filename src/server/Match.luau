@@ -47,6 +47,11 @@ local function getTeamForce(participants: { Types.ParticipantState }, now: numbe
 	return force
 end
 
+-- 2026-11-20 디버그 HUD용 양 팀 힘 조회 추가
+function Match.getForces(self: Match, now: number): (number, number)
+	return getTeamForce(self.teams.A, now), getTeamForce(self.teams.B, now)
+end
+
 function Match.step(self: Match, dt: number, now: number): ()
 	if self.phase == "Countdown" then
 		self.timeLeft -= dt
