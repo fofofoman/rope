@@ -60,7 +60,8 @@
 
 return {
 	-- 2026-11-20 경기 시간을 45초에서 30초로 단축
-	ROUND_DURATION = 30,
+	-- 2026-11-21 경기 시간을 30초에서 50초로 연장
+	ROUND_DURATION = 50,
 	COUNTDOWN = 3,
 	ROPE_LIMIT = 100,
 	ROPE_SPEED = 2.5,
@@ -91,6 +92,35 @@ return {
 	PUZZLE_FIRST_DELAY = 2,
 	ARROW_SEQUENCE_LENGTH = { 4, 6 },
 	ARROW_DIRECTIONS = { "Up", "Right", "Down", "Left" },
+
+	-- 2026-11-21 퍼즐 3종(NumberOrder, ColorMatch, MiniMaze) 설정과 종류별 제목·제한 시간 추가
+	PUZZLE_TITLES = {
+		ArrowSequence = "화살표 순서",
+		NumberOrder = "숫자 순서",
+		ColorMatch = "같은 색 찾기",
+		MiniMaze = "미로 탈출",
+	} :: { [string]: string },
+	-- 목록에 없는 종류는 PUZZLE_TIMEOUT을 사용한다.
+	PUZZLE_TIMEOUT_BY_KIND = { MiniMaze = 6 } :: { [string]: number },
+	NUMBER_ORDER = { count = 6, columns = 3, rows = 2, jitter = 0.08, buttonWidth = 0.28, buttonHeight = 0.38 },
+	COLOR_MATCH = {
+		tileCount = 6,
+		columns = 3,
+		-- 타일 색은 중복 없이 뽑으므로 tileCount 이상이어야 한다.
+		names = { "Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Pink", "Cyan" },
+		colors = {
+			Red = Color3.fromRGB(225, 70, 70),
+			Orange = Color3.fromRGB(240, 150, 50),
+			Yellow = Color3.fromRGB(240, 220, 70),
+			Green = Color3.fromRGB(80, 190, 90),
+			Blue = Color3.fromRGB(70, 120, 230),
+			Purple = Color3.fromRGB(150, 90, 210),
+			Pink = Color3.fromRGB(240, 130, 190),
+			Cyan = Color3.fromRGB(70, 200, 220),
+		} :: { [string]: Color3 },
+		targetHeight = 0.28,
+	},
+	MINI_MAZE = { size = 5, wallThickness = 0.08, cursorScale = 0.5 },
 
 	BOT = {
 		Easy = { tps = 5, qteRate = 0.5, puzzleRate = 0.5 },
@@ -463,6 +493,20 @@ function Match.step(self: Match, dt: number, now: number): ()
 	end
 end
 
+-- 2026-11-21 InstantPull 보상: 줄을 팀 쪽으로 즉시 당기고 끝에 닿으면 경기 종료
+function Match.pull(self: Match, team: "A" | "B", amount: number): ()
+	if self.phase ~= "Playing" then
+		return
+	end
+	local limit = Config.ROPE_LIMIT
+	local direction = if team == "A" then 1 else -1
+	self.ropePosition = math.clamp(self.ropePosition + direction * amount, -limit, limit)
+	if math.abs(self.ropePosition) == limit then
+		self.phase = "Ended"
+		self.winner = team
+	end
+end
+
 return Match
 ]]></string>
         </Properties>
@@ -603,6 +647,17 @@ function MatchService.start()
 				arena:SetAttribute("BuffUntil", round.participant.buffUntil)
 			end
 			Remotes.PuzzleResult:FireClient(player, id, success, reward)
+			-- 2026-11-21 InstantPull 보상 적용 (플레이어는 A팀). 줄이 끝에 닿아 경기가 끝나면 상태를 바로 전파
+			if reward == "InstantPull" then
+				local match = round.match
+				match:pull("A", Config.INSTANT_PULL)
+				arena:SetAttribute("RopePosition", match.ropePosition)
+				if match.phase == "Ended" then
+					round.participant.buffUntil = 0
+					arena:SetAttribute("BuffUntil", 0)
+				end
+				publishState(arena, round)
+			end
 		end
 	end)
 
@@ -620,8 +675,9 @@ function MatchService.start()
 			local puzzle, expiredId = PuzzleService.update(round.puzzleSchedule, round.participant, now)
 			if puzzle then
 				-- 2026-11-19 서버가 판정에 사용하는 마감 시각을 퍼즐과 함께 전송
+				-- 2026-11-21 퍼즐 종류별 제한 시간을 반영해 발행 시각과 마감 시각의 차이를 전송
 				Remotes.PuzzleIssued:FireClient(
-					round.player, puzzle.id, puzzle.definition.kind, puzzle.displayData, Config.PUZZLE_TIMEOUT, puzzle.expiresAt
+					round.player, puzzle.id, puzzle.definition.kind, puzzle.displayData, puzzle.expiresAt - puzzle.issuedAt, puzzle.expiresAt
 				)
 			elseif expiredId then
 				Remotes.PuzzleResult:FireClient(round.player, expiredId, false)
@@ -684,15 +740,33 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Types = require(Shared.Types)
 local ArrowSequence = require(script.Parent.Puzzles.ArrowSequence)
+-- 2026-11-21 숫자 순서, 같은 색 찾기, 미니 미로 퍼즐 추가
+local ColorMatch = require(script.Parent.Puzzles.ColorMatch)
+local MiniMaze = require(script.Parent.Puzzles.MiniMaze)
+local NumberOrder = require(script.Parent.Puzzles.NumberOrder)
 
-export type Schedule = { nextAt: number? }
+export type Schedule = { nextAt: number?, lastKind: string? }
 
+local definitions: { Types.PuzzleDef } = { ArrowSequence, NumberOrder, ColorMatch, MiniMaze }
 local rng = Random.new()
 local lastPuzzleId = 0
 local PuzzleService = {}
 
 function PuzzleService.newSchedule(): Schedule
-	return { nextAt = nil }
+	return { nextAt = nil, lastKind = nil }
+end
+
+-- 같은 종류가 연속으로 나오지 않도록 직전 종류를 제외하고 무작위로 고른다.
+local function pickDefinition(schedule: Schedule): Types.PuzzleDef
+	local candidates: { Types.PuzzleDef } = {}
+	for _, definition in definitions do
+		if definition.kind ~= schedule.lastKind then
+			table.insert(candidates, definition)
+		end
+	end
+	local picked = candidates[rng:NextInteger(1, #candidates)]
+	schedule.lastKind = picked.kind
+	return picked
 end
 
 function PuzzleService.update(schedule: Schedule, participant: Types.ParticipantState, now: number): (Types.ActivePuzzle?, number?)
@@ -715,14 +789,15 @@ function PuzzleService.update(schedule: Schedule, participant: Types.Participant
 	end
 
 	lastPuzzleId += 1
-	local displayData, solutionInfo = ArrowSequence.generate(rng, rng:NextNumber())
+	local definition = pickDefinition(schedule)
+	local displayData, solutionInfo = definition.generate(rng, rng:NextNumber())
 	local puzzle: Types.ActivePuzzle = {
 		id = lastPuzzleId,
-		definition = ArrowSequence,
+		definition = definition,
 		displayData = displayData,
 		solutionInfo = solutionInfo,
 		issuedAt = now,
-		expiresAt = now + Config.PUZZLE_TIMEOUT,
+		expiresAt = now + (Config.PUZZLE_TIMEOUT_BY_KIND[definition.kind] or Config.PUZZLE_TIMEOUT),
 	}
 	participant.activePuzzle = puzzle
 	schedule.nextAt = now + rng:NextNumber(Config.PUZZLE_INTERVAL[1], Config.PUZZLE_INTERVAL[2])
@@ -806,22 +881,280 @@ return ArrowSequence
 ]]></string>
           </Properties>
         </Item>
+        <Item class="ModuleScript" referent="24">
+          <Properties>
+            <string name="Name">ColorMatch</string>
+            <string name="Source"><![CDATA[--!strict
+-- 2026-11-21 같은 색 찾기 퍼즐 생성 및 제출 검증 추가
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Types = require(Shared.Types)
+
+local settings = Config.COLOR_MATCH
+
+-- 타일 색은 중복 없이 뽑으므로 목표 색과 같은 타일은 항상 정확히 하나다.
+local function generate(rng: Random, _difficulty: number): ({ target: string, tiles: { string } }, nil)
+	local names: { string } = table.clone(settings.names)
+	for index = #names, 2, -1 do
+		local swapIndex = rng:NextInteger(1, index)
+		names[index], names[swapIndex] = names[swapIndex], names[index]
+	end
+
+	local tiles: { string } = {}
+	for index = 1, settings.tileCount do
+		tiles[index] = names[index]
+	end
+	return { target = tiles[rng:NextInteger(1, #tiles)], tiles = tiles }, nil
+end
+
+-- 제출은 고른 타일의 번호(정수)이며, 그 타일의 색이 목표 색이어야 한다.
+local function validate(displayData: any, _solutionInfo: any, submission: unknown): boolean
+	if typeof(submission) ~= "number" or submission % 1 ~= 0 then
+		return false
+	end
+
+	local tiles: { string } = displayData.tiles
+	return tiles[submission] == displayData.target
+end
+
+local ColorMatch: Types.PuzzleDef = {
+	kind = "ColorMatch",
+	reward = "InstantPull",
+	generate = generate,
+	validate = validate,
+}
+
+return ColorMatch
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="25">
+          <Properties>
+            <string name="Name">MiniMaze</string>
+            <string name="Source"><![CDATA[--!strict
+-- 2026-11-21 미니 미로 퍼즐 생성 및 경로 검증 추가
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Types = require(Shared.Types)
+
+local SIZE: number = Config.MINI_MAZE.size
+local CELL_COUNT = SIZE * SIZE
+local START_CELL = 1
+local EXIT_CELL = CELL_COUNT
+-- 되돌아가는 경로를 감안한 제출 길이 상한 (비정상적으로 긴 배열 차단)
+local MAX_PATH_LENGTH = CELL_COUNT * 4
+
+export type MazeData = {
+	size: number,
+	right: { boolean }, -- right[i]: i번 칸과 오른쪽 칸 사이가 열려 있는지
+	down: { boolean }, -- down[i]: i번 칸과 아래쪽 칸 사이가 열려 있는지
+	start: number,
+	exit: number,
+}
+
+-- 칸 번호는 (행 - 1) * SIZE + 열 이다. 시작은 왼쪽 위, 출구는 오른쪽 아래로 고정한다.
+local function isOpen(maze: MazeData, from: number, to: number): boolean
+	local column = (from - 1) % SIZE + 1
+	if to == from + 1 then
+		return column < SIZE and maze.right[from]
+	elseif to == from - 1 then
+		return column > 1 and maze.right[to]
+	elseif to == from + SIZE then
+		return maze.down[from] == true
+	elseif to == from - SIZE then
+		return maze.down[to] == true
+	end
+	return false
+end
+
+-- 깊이 우선 탐색으로 모든 칸이 연결된 미로를 만든다. 시작에서 출구까지 길이 반드시 존재한다.
+local function generate(rng: Random, _difficulty: number): (MazeData, nil)
+	local maze: MazeData = { size = SIZE, right = {}, down = {}, start = START_CELL, exit = EXIT_CELL }
+	local visited: { boolean } = {}
+	for cell = 1, CELL_COUNT do
+		maze.right[cell] = false
+		maze.down[cell] = false
+		visited[cell] = false
+	end
+
+	local stack: { number } = { START_CELL }
+	visited[START_CELL] = true
+	while #stack > 0 do
+		local cell = stack[#stack]
+		local row = (cell - 1) // SIZE + 1
+		local column = (cell - 1) % SIZE + 1
+
+		local candidates: { number } = {}
+		if column < SIZE and not visited[cell + 1] then
+			table.insert(candidates, cell + 1)
+		end
+		if column > 1 and not visited[cell - 1] then
+			table.insert(candidates, cell - 1)
+		end
+		if row < SIZE and not visited[cell + SIZE] then
+			table.insert(candidates, cell + SIZE)
+		end
+		if row > 1 and not visited[cell - SIZE] then
+			table.insert(candidates, cell - SIZE)
+		end
+
+		if #candidates == 0 then
+			table.remove(stack)
+		else
+			local nextCell = candidates[rng:NextInteger(1, #candidates)]
+			if nextCell == cell + 1 then
+				maze.right[cell] = true
+			elseif nextCell == cell - 1 then
+				maze.right[nextCell] = true
+			elseif nextCell == cell + SIZE then
+				maze.down[cell] = true
+			else
+				maze.down[nextCell] = true
+			end
+			visited[nextCell] = true
+			table.insert(stack, nextCell)
+		end
+	end
+	return maze, nil
+end
+
+-- 제출은 지나간 칸 번호의 배열이다. 시작칸에서 출발해 벽을 통과하지 않고 출구에 닿으면 성공이다.
+local function validate(displayData: any, _solutionInfo: any, submission: unknown): boolean
+	if typeof(submission) ~= "table" then
+		return false
+	end
+
+	local path: { unknown } = submission :: any
+	local count = 0
+	for index in pairs(path) do
+		if typeof(index) ~= "number" then
+			return false
+		end
+		count += 1
+	end
+	if count < 2 or count > MAX_PATH_LENGTH then
+		return false
+	end
+
+	local maze: MazeData = displayData
+	local previous: number? = nil
+	for index = 1, count do
+		local cell = path[index]
+		if typeof(cell) ~= "number" or cell % 1 ~= 0 or cell < 1 or cell > CELL_COUNT then
+			return false
+		end
+		if previous == nil then
+			if cell ~= maze.start then
+				return false
+			end
+		elseif not isOpen(maze, previous, cell) then
+			return false
+		end
+		previous = cell
+	end
+	return previous == maze.exit
+end
+
+local MiniMaze: Types.PuzzleDef = {
+	kind = "MiniMaze",
+	reward = "Buff",
+	generate = generate,
+	validate = validate,
+}
+
+return MiniMaze
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="26">
+          <Properties>
+            <string name="Name">NumberOrder</string>
+            <string name="Source"><![CDATA[--!strict
+-- 2026-11-21 숫자 순서 퍼즐 생성 및 제출 검증 추가
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Types = require(Shared.Types)
+
+local settings = Config.NUMBER_ORDER
+
+-- 숫자는 칸마다 하나씩 배치하고 칸 안에서만 흔들어서 서로 겹치지 않게 한다.
+local function generate(rng: Random, _difficulty: number): ({ items: { { number: number, x: number, y: number } } }, nil)
+	local cells: { number } = {}
+	for index = 1, settings.columns * settings.rows do
+		cells[index] = index
+	end
+	for index = #cells, 2, -1 do
+		local swapIndex = rng:NextInteger(1, index)
+		cells[index], cells[swapIndex] = cells[swapIndex], cells[index]
+	end
+
+	local items = {}
+	for number = 1, settings.count do
+		local cell = cells[number] - 1
+		local column = cell % settings.columns
+		local row = cell // settings.columns
+		items[number] = {
+			number = number,
+			x = (column + 0.5) / settings.columns + rng:NextNumber(-settings.jitter, settings.jitter) / settings.columns,
+			y = (row + 0.5) / settings.rows + rng:NextNumber(-settings.jitter, settings.jitter) / settings.rows,
+		}
+	end
+	return { items = items }, nil
+end
+
+-- 제출은 눌린 숫자를 순서대로 담은 배열이어야 하고, 1부터 count까지 정확히 이어져야 한다.
+local function validate(_displayData: any, _solutionInfo: any, submission: unknown): boolean
+	if typeof(submission) ~= "table" then
+		return false
+	end
+
+	local count = 0
+	for index, number in pairs(submission) do
+		if typeof(index) ~= "number" or typeof(number) ~= "number" or number ~= index then
+			return false
+		end
+		-- 1..count 범위의 정수 칸만 허용 (예: 1~5와 7을 보내 개수만 맞추는 제출 차단)
+		if index < 1 or index > settings.count or index % 1 ~= 0 then
+			return false
+		end
+		count += 1
+	end
+	return count == settings.count
+end
+
+local NumberOrder: Types.PuzzleDef = {
+	kind = "NumberOrder",
+	reward = "InstantPull",
+	generate = generate,
+	validate = validate,
+}
+
+return NumberOrder
+]]></string>
+          </Properties>
+        </Item>
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="24">
+  <Item class="StarterPlayer" referent="27">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="25">
+    <Item class="StarterPlayerScripts" referent="28">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="26">
+      <Item class="Folder" referent="29">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="ModuleScript" referent="27">
+        <Item class="ModuleScript" referent="30">
           <Properties>
             <string name="Name">HudController</string>
             <string name="Source"><![CDATA[--!strict
@@ -1073,7 +1406,7 @@ return HudController
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="28">
+        <Item class="LocalScript" referent="31">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[--!strict
@@ -1117,7 +1450,7 @@ end
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="29">
+        <Item class="ModuleScript" referent="32">
           <Properties>
             <string name="Name">MashController</string>
             <string name="Source"><![CDATA[--!strict
@@ -1250,7 +1583,7 @@ return MashController
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="30">
+        <Item class="ModuleScript" referent="33">
           <Properties>
             <string name="Name">MobileLayout</string>
             <string name="Source"><![CDATA[--!strict
@@ -1289,7 +1622,7 @@ return MobileLayout
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="31">
+        <Item class="ModuleScript" referent="34">
           <Properties>
             <string name="Name">PuzzleController</string>
             <string name="Source"><![CDATA[--!strict
@@ -1307,6 +1640,10 @@ local Types = require(Shared.Types)
 
 local renderers: { [string]: Types.PuzzleRenderer } = {
 	ArrowSequence = require(script.Parent.PuzzleRenderers.ArrowSequence),
+	-- 2026-11-21 숫자 순서, 같은 색 찾기, 미니 미로 렌더러 등록
+	NumberOrder = require(script.Parent.PuzzleRenderers.NumberOrder),
+	ColorMatch = require(script.Parent.PuzzleRenderers.ColorMatch),
+	MiniMaze = require(script.Parent.PuzzleRenderers.MiniMaze),
 }
 
 type PresentedPuzzle = {
@@ -1423,6 +1760,8 @@ function PuzzleController.start(arena: Model)
 		end
 
 		clearPuzzle()
+		-- 2026-11-21 퍼즐 종류에 맞는 제목 표시
+		title.Text = Config.PUZZLE_TITLES[kind] or kind
 		local puzzle: PresentedPuzzle = {
 			id = id,
 			renderer = renderer,
@@ -1482,26 +1821,37 @@ return PuzzleController
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="32">
+        <Item class="Folder" referent="35">
           <Properties>
             <string name="Name">PuzzleRenderers</string>
           </Properties>
-          <Item class="ModuleScript" referent="33">
+          <Item class="ModuleScript" referent="36">
             <Properties>
               <string name="Name">ArrowSequence</string>
               <string name="Source"><![CDATA[--!strict
 -- 2026-11-19 화살표 순서 표시와 마우스·터치 제출 추가
 
+local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Types = require(Shared.Types)
 
 local glyphs: { [string]: string } = { Up = "↑", Right = "→", Down = "↓", Left = "←" }
+-- 2026-11-21 PC 키보드 방향키로도 퍼즐을 입력할 수 있도록 키 매핑 추가
+local keyDirections: { [Enum.KeyCode]: string } = {
+	[Enum.KeyCode.Up] = "Up",
+	[Enum.KeyCode.Right] = "Right",
+	[Enum.KeyCode.Down] = "Down",
+	[Enum.KeyCode.Left] = "Left",
+}
+local KEY_ACTION_NAME = "PullPanicPuzzleArrow"
 local layout = Config.PUZZLE_VIEW
 local content: Frame? = nil
 
 local function cleanup()
+	ContextActionService:UnbindAction(KEY_ACTION_NAME)
 	if content then
 		content:Destroy()
 		content = nil
@@ -1554,6 +1904,26 @@ local function render(parent: GuiObject, displayData: any, onSubmit: (unknown) -
 	labels[1].BackgroundColor3 = Color3.fromRGB(66, 102, 156)
 
 	local submission: { string } = {}
+	-- 2026-11-21 마우스·터치와 키보드가 같은 입력 처리를 쓰도록 분리
+	local function press(direction: string)
+		if #submission >= #sequence then
+			return
+		end
+		-- 2026-11-21 틀린 방향은 실패 처리하지 않고 무시해서 맞는 키가 눌릴 때까지 진행하지 않음
+		if direction ~= sequence[#submission + 1] then
+			return
+		end
+		table.insert(submission, direction)
+		local position = #submission
+		labels[position].BackgroundColor3 = Color3.fromRGB(31, 43, 58)
+		labels[position].TextColor3 = Color3.fromRGB(147, 166, 191)
+		if position == #sequence then
+			onSubmit(submission)
+		else
+			labels[position + 1].BackgroundColor3 = Color3.fromRGB(66, 102, 156)
+		end
+	end
+
 	local directions = Config.ARROW_DIRECTIONS
 	local buttonRow = createRow(root, layout.buttonTop, 1 - layout.buttonTop)
 	for index, direction in directions do
@@ -1569,20 +1939,21 @@ local function render(parent: GuiObject, displayData: any, onSubmit: (unknown) -
 		button.Font = Enum.Font.GothamBold
 		button.Parent = buttonRow
 		button.Activated:Connect(function()
-			if #submission >= #sequence then
-				return
-			end
-			table.insert(submission, direction)
-			local position = #submission
-			labels[position].BackgroundColor3 = Color3.fromRGB(31, 43, 58)
-			labels[position].TextColor3 = Color3.fromRGB(147, 166, 191)
-			if position == #sequence then
-				onSubmit(submission)
-			else
-				labels[position + 1].BackgroundColor3 = Color3.fromRGB(66, 102, 156)
-			end
+			press(direction)
 		end)
 	end
+
+	-- 2026-11-21 퍼즐이 떠 있는 동안 방향키 입력을 퍼즐로 받고, 카메라 회전 등 기본 동작으로 넘기지 않음
+	ContextActionService:BindActionAtPriority(KEY_ACTION_NAME, function(_, state: Enum.UserInputState, input: InputObject)
+		if UserInputService:GetFocusedTextBox() then
+			return Enum.ContextActionResult.Pass
+		end
+		local direction = keyDirections[input.KeyCode]
+		if state == Enum.UserInputState.Begin and direction then
+			press(direction)
+		end
+		return Enum.ContextActionResult.Sink
+	end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Up, Enum.KeyCode.Right, Enum.KeyCode.Down, Enum.KeyCode.Left)
 end
 
 local ArrowSequence: Types.PuzzleRenderer = { render = render, cleanup = cleanup }
@@ -1590,8 +1961,513 @@ return ArrowSequence
 ]]></string>
             </Properties>
           </Item>
+          <Item class="ModuleScript" referent="37">
+            <Properties>
+              <string name="Name">ColorMatch</string>
+              <string name="Source"><![CDATA[--!strict
+-- 2026-11-21 같은 색 찾기 퍼즐 화면 추가 (틀린 타일은 회색으로 비활성화하고 계속 선택 가능)
+
+-- 2026-11-21 PC 키보드 숫자키(1~6)로 타일 번호를 골라 입력할 수 있도록 추가
+
+local ContextActionService = game:GetService("ContextActionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Types = require(Shared.Types)
+
+local settings = Config.COLOR_MATCH
+local layout = Config.PUZZLE_VIEW
+local keyNumbers: { [Enum.KeyCode]: number } = {
+	[Enum.KeyCode.One] = 1,
+	[Enum.KeyCode.Two] = 2,
+	[Enum.KeyCode.Three] = 3,
+	[Enum.KeyCode.Four] = 4,
+	[Enum.KeyCode.Five] = 5,
+	[Enum.KeyCode.Six] = 6,
+}
+local KEY_ACTION_NAME = "PullPanicPuzzleColor"
+local content: Frame? = nil
+
+local function cleanup()
+	ContextActionService:UnbindAction(KEY_ACTION_NAME)
+	if content then
+		content:Destroy()
+		content = nil
+	end
+end
+
+local function render(parent: GuiObject, displayData: any, onSubmit: (unknown) -> ())
+	cleanup()
+	local root = Instance.new("Frame")
+	root.Size = UDim2.fromScale(1, 1)
+	root.BackgroundTransparency = 1
+	root.Parent = parent
+	content = root
+
+	local target: string = displayData.target
+	local tiles: { string } = displayData.tiles
+
+	-- 목표 색: 아래 타일과 구분되도록 흰 테두리를 둔다.
+	local targetSwatch = Instance.new("Frame")
+	targetSwatch.Name = "Target"
+	targetSwatch.AnchorPoint = Vector2.new(0.5, 0)
+	targetSwatch.Position = UDim2.fromScale(0.5, 0)
+	targetSwatch.Size = UDim2.fromScale(0.5, settings.targetHeight)
+	targetSwatch.BorderSizePixel = 0
+	targetSwatch.BackgroundColor3 = settings.colors[target]
+	targetSwatch.Parent = root
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.new(1, 1, 1)
+	stroke.Thickness = 2
+	stroke.Parent = targetSwatch
+
+	local columns = settings.columns
+	local rows = math.ceil(#tiles / columns)
+	local gap = layout.tileGap
+	local gridTop = settings.targetHeight + gap
+	local grid = Instance.new("Frame")
+	grid.Name = "Tiles"
+	grid.Position = UDim2.fromScale(0, gridTop)
+	grid.Size = UDim2.fromScale(1, 1 - gridTop)
+	grid.BackgroundTransparency = 1
+	grid.Parent = root
+
+	local gridLayout = Instance.new("UIGridLayout")
+	gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	gridLayout.CellPadding = UDim2.fromScale(gap, gap)
+	gridLayout.CellSize = UDim2.fromScale((1 - gap * (columns - 1)) / columns, (1 - gap * (rows - 1)) / rows)
+	gridLayout.Parent = grid
+
+	-- 마우스·터치와 키보드가 같은 입력 처리를 쓴다. 이미 틀린 타일은 다시 고르지 못한다.
+	local tileButtons: { TextButton } = {}
+	local wrong: { [number]: boolean } = {}
+	local function choose(index: number)
+		local tile = tileButtons[index]
+		if not tile or wrong[index] then
+			return
+		end
+		if tiles[index] == target then
+			onSubmit(index)
+			return
+		end
+		wrong[index] = true
+		tile.Active = false
+		tile.BackgroundColor3 = Color3.fromRGB(58, 66, 78)
+	end
+
+	for index, colorName in tiles do
+		local tile = Instance.new("TextButton")
+		tile.Name = colorName
+		tile.LayoutOrder = index
+		tile.BorderSizePixel = 0
+		tile.AutoButtonColor = false
+		tile.BackgroundColor3 = settings.colors[colorName]
+		tile.Text = tostring(index)
+		tile.TextScaled = true
+		tile.Font = Enum.Font.GothamBold
+		tile.TextColor3 = Color3.fromRGB(20, 28, 40)
+		tile.TextTransparency = 0.45
+		tile.Parent = grid
+		tileButtons[index] = tile
+
+		tile.Activated:Connect(function()
+			choose(index)
+		end)
+	end
+
+	-- 퍼즐이 떠 있는 동안 숫자키 입력을 퍼즐로 받고 다른 기본 동작으로 넘기지 않음
+	ContextActionService:BindActionAtPriority(KEY_ACTION_NAME, function(_, state: Enum.UserInputState, input: InputObject)
+		if UserInputService:GetFocusedTextBox() then
+			return Enum.ContextActionResult.Pass
+		end
+		local number = keyNumbers[input.KeyCode]
+		if state == Enum.UserInputState.Begin and number then
+			choose(number)
+		end
+		return Enum.ContextActionResult.Sink
+	end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three,
+		Enum.KeyCode.Four, Enum.KeyCode.Five, Enum.KeyCode.Six)
+end
+
+local ColorMatch: Types.PuzzleRenderer = { render = render, cleanup = cleanup }
+return ColorMatch
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="38">
+            <Properties>
+              <string name="Name">MiniMaze</string>
+              <string name="Source"><![CDATA[--!strict
+-- 2026-11-21 미니 미로 퍼즐 화면 추가 (드래그로 칸을 따라 이동, 벽 방향으로는 이동하지 않음)
+
+-- 2026-11-21 PC 키보드 방향키로 한 칸씩 이동할 수 있도록 추가
+
+local ContextActionService = game:GetService("ContextActionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Types = require(Shared.Types)
+
+local settings = Config.MINI_MAZE
+local FAST_DRAG_MAX_STEPS = 3 -- 빠르게 드래그해 칸을 건너뛰어도 이 거리 안이면 길을 따라 이어준다
+local BASE_COLOR = Color3.fromRGB(27, 37, 52)
+local START_COLOR = Color3.fromRGB(60, 140, 90)
+local EXIT_COLOR = Color3.fromRGB(230, 190, 70)
+local PATH_COLOR = Color3.fromRGB(66, 102, 156)
+local HEAD_COLOR = Color3.fromRGB(120, 170, 240)
+local WALL_COLOR = Color3.fromRGB(200, 215, 235)
+
+local KEY_ACTION_NAME = "PullPanicPuzzleMaze"
+local content: Frame? = nil
+local connections: { RBXScriptConnection } = {}
+
+local function cleanup()
+	ContextActionService:UnbindAction(KEY_ACTION_NAME)
+	for _, connection in connections do
+		connection:Disconnect()
+	end
+	table.clear(connections)
+	if content then
+		content:Destroy()
+		content = nil
+	end
+end
+
+local function render(parent: GuiObject, displayData: any, onSubmit: (unknown) -> ())
+	cleanup()
+	local size: number = displayData.size
+	local right: { boolean } = displayData.right
+	local down: { boolean } = displayData.down
+	local startCell: number = displayData.start
+	local exitCell: number = displayData.exit
+
+	local root = Instance.new("Frame")
+	root.Size = UDim2.fromScale(1, 1)
+	root.BackgroundTransparency = 1
+	root.Parent = parent
+	content = root
+
+	-- 미로 판은 정사각형으로 가운데에 둔다.
+	local board = Instance.new("Frame")
+	board.Name = "Board"
+	board.AnchorPoint = Vector2.new(0.5, 0.5)
+	board.Position = UDim2.fromScale(0.5, 0.5)
+	board.Size = UDim2.fromScale(1, 1)
+	board.BorderSizePixel = 0
+	board.BackgroundColor3 = BASE_COLOR
+	board.Active = true
+	board.Parent = root
+	local aspect = Instance.new("UIAspectRatioConstraint")
+	aspect.AspectRatio = 1
+	aspect.Parent = board
+	local border = Instance.new("UIStroke")
+	border.Color = WALL_COLOR
+	border.Thickness = 2
+	border.Parent = board
+
+	local cellScale = 1 / size
+	local cells: { Frame } = {}
+	local function baseColor(cell: number): Color3
+		if cell == startCell then
+			return START_COLOR
+		elseif cell == exitCell then
+			return EXIT_COLOR
+		end
+		return BASE_COLOR
+	end
+
+	for cell = 1, size * size do
+		local row = (cell - 1) // size
+		local column = (cell - 1) % size
+		local frame = Instance.new("Frame")
+		frame.Name = tostring(cell)
+		frame.Position = UDim2.fromScale(column * cellScale, row * cellScale)
+		frame.Size = UDim2.fromScale(cellScale, cellScale)
+		frame.BorderSizePixel = 0
+		frame.BackgroundColor3 = baseColor(cell)
+		frame.Parent = board
+		cells[cell] = frame
+	end
+
+	-- 열려 있지 않은 칸 사이에 벽을 그린다. 모서리 틈이 생기지 않도록 벽 길이를 두께만큼 늘린다.
+	local thick = settings.wallThickness * cellScale
+	local function addWall(x: number, y: number, width: number, height: number)
+		local wall = Instance.new("Frame")
+		wall.AnchorPoint = Vector2.new(0.5, 0.5)
+		wall.Position = UDim2.fromScale(x, y)
+		wall.Size = UDim2.fromScale(width, height)
+		wall.BorderSizePixel = 0
+		wall.BackgroundColor3 = WALL_COLOR
+		wall.ZIndex = 2
+		wall.Parent = board
+	end
+	for cell = 1, size * size do
+		local row = (cell - 1) // size + 1
+		local column = (cell - 1) % size + 1
+		if column < size and not right[cell] then
+			addWall(column * cellScale, (row - 0.5) * cellScale, thick, cellScale + thick)
+		end
+		if row < size and not down[cell] then
+			addWall((column - 0.5) * cellScale, row * cellScale, cellScale + thick, thick)
+		end
+	end
+
+	-- 서버 검증과 같은 규칙: 인접한 칸이고 사이가 열려 있어야 이동할 수 있다.
+	local function isOpen(from: number, to: number): boolean
+		local column = (from - 1) % size + 1
+		if to == from + 1 then
+			return column < size and right[from]
+		elseif to == from - 1 then
+			return column > 1 and right[to]
+		elseif to == from + size then
+			return down[from] == true
+		elseif to == from - size then
+			return down[to] == true
+		end
+		return false
+	end
+
+	local path: { number } = { startCell }
+	local inPath: { [number]: boolean } = { [startCell] = true }
+	local function paint()
+		for cell, frame in cells do
+			frame.BackgroundColor3 = if inPath[cell] then PATH_COLOR else baseColor(cell)
+		end
+		cells[path[#path]].BackgroundColor3 = HEAD_COLOR
+	end
+	paint()
+
+	-- 머리(현재 칸)에서 목표 칸까지 열린 길을 따라 최대 maxSteps칸 안에 갈 수 있으면 그 경로를 돌려준다.
+	local function findRoute(target: number, maxSteps: number): { number }?
+		local head = path[#path]
+		local cameFrom: { [number]: number } = {}
+		local frontier: { number } = { head }
+		local seen: { [number]: boolean } = { [head] = true }
+		for _ = 1, maxSteps do
+			local nextFrontier: { number } = {}
+			for _, cell in frontier do
+				for _, neighbor in { cell + 1, cell - 1, cell + size, cell - size } do
+					if neighbor >= 1 and neighbor <= size * size and not seen[neighbor]
+						and not inPath[neighbor] and isOpen(cell, neighbor) then
+						seen[neighbor] = true
+						cameFrom[neighbor] = cell
+						if neighbor == target then
+							local route: { number } = {}
+							local step: number? = neighbor
+							while step and step ~= head do
+								table.insert(route, 1, step)
+								step = cameFrom[step]
+							end
+							return route
+						end
+						table.insert(nextFrontier, neighbor)
+					end
+				end
+			end
+			frontier = nextFrontier
+		end
+		return nil
+	end
+
+	local dragging = false
+	local finished = false
+	local function moveTo(target: number)
+		if finished then
+			return
+		end
+		-- 지나온 칸으로 돌아오면 그 칸까지 경로를 되감는다.
+		if inPath[target] then
+			while path[#path] ~= target do
+				inPath[table.remove(path) :: number] = nil
+			end
+		else
+			local route = findRoute(target, FAST_DRAG_MAX_STEPS)
+			if not route then
+				return
+			end
+			for _, cell in route do
+				table.insert(path, cell)
+				inPath[cell] = true
+			end
+		end
+		paint()
+		if path[#path] == exitCell then
+			finished = true
+			dragging = false
+			onSubmit(table.clone(path))
+		end
+	end
+
+	local function cellAt(position: Vector3): number?
+		local relativeX = (position.X - board.AbsolutePosition.X) / board.AbsoluteSize.X
+		local relativeY = (position.Y - board.AbsolutePosition.Y) / board.AbsoluteSize.Y
+		if relativeX < 0 or relativeX >= 1 or relativeY < 0 or relativeY >= 1 then
+			return nil
+		end
+		return math.floor(relativeY * size) * size + math.floor(relativeX * size) + 1
+	end
+
+	table.insert(connections, board.InputBegan:Connect(function(input: InputObject)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			local cell = cellAt(input.Position)
+			if cell then
+				moveTo(cell)
+			end
+		end
+	end))
+	table.insert(connections, UserInputService.InputChanged:Connect(function(input: InputObject)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			local cell = cellAt(input.Position)
+			if cell then
+				moveTo(cell)
+			end
+		end
+	end))
+	table.insert(connections, UserInputService.InputEnded:Connect(function(input: InputObject)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end))
+
+	-- 방향키 한 번에 한 칸씩 이동한다. 벽이 있거나 판 밖이면 무시하고, 이전 칸 방향이면 되돌아간다.
+	local keyOffsets: { [Enum.KeyCode]: number } = {
+		[Enum.KeyCode.Up] = -size,
+		[Enum.KeyCode.Down] = size,
+		[Enum.KeyCode.Left] = -1,
+		[Enum.KeyCode.Right] = 1,
+	}
+	-- 퍼즐이 떠 있는 동안 방향키 입력을 퍼즐로 받고, 카메라 회전 등 기본 동작으로 넘기지 않음
+	ContextActionService:BindActionAtPriority(KEY_ACTION_NAME, function(_, state: Enum.UserInputState, input: InputObject)
+		if UserInputService:GetFocusedTextBox() then
+			return Enum.ContextActionResult.Pass
+		end
+		local offset = keyOffsets[input.KeyCode]
+		if state == Enum.UserInputState.Begin and offset then
+			local target = path[#path] + offset
+			if target >= 1 and target <= size * size and isOpen(path[#path], target) then
+				moveTo(target)
+			end
+		end
+		return Enum.ContextActionResult.Sink
+	end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Up, Enum.KeyCode.Right, Enum.KeyCode.Down, Enum.KeyCode.Left)
+end
+
+local MiniMaze: Types.PuzzleRenderer = { render = render, cleanup = cleanup }
+return MiniMaze
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="39">
+            <Properties>
+              <string name="Name">NumberOrder</string>
+              <string name="Source"><![CDATA[--!strict
+-- 2026-11-21 숫자 순서 퍼즐 화면 추가 (틀린 숫자는 무시하고 순서대로 누른 숫자만 제출)
+-- 2026-11-21 PC 키보드 숫자키(1~6)로도 입력할 수 있도록 추가
+
+local ContextActionService = game:GetService("ContextActionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
+local Types = require(Shared.Types)
+
+local settings = Config.NUMBER_ORDER
+local keyNumbers: { [Enum.KeyCode]: number } = {
+	[Enum.KeyCode.One] = 1,
+	[Enum.KeyCode.Two] = 2,
+	[Enum.KeyCode.Three] = 3,
+	[Enum.KeyCode.Four] = 4,
+	[Enum.KeyCode.Five] = 5,
+	[Enum.KeyCode.Six] = 6,
+}
+local KEY_ACTION_NAME = "PullPanicPuzzleNumber"
+local content: Frame? = nil
+
+local function cleanup()
+	ContextActionService:UnbindAction(KEY_ACTION_NAME)
+	if content then
+		content:Destroy()
+		content = nil
+	end
+end
+
+local function render(parent: GuiObject, displayData: any, onSubmit: (unknown) -> ())
+	cleanup()
+	local root = Instance.new("Frame")
+	root.Size = UDim2.fromScale(1, 1)
+	root.BackgroundTransparency = 1
+	root.Parent = parent
+	content = root
+
+	local items: { { number: number, x: number, y: number } } = displayData.items
+	local submission: { number } = {}
+	local buttons: { [number]: TextButton } = {}
+
+	-- 마우스·터치와 키보드가 같은 입력 처리를 쓴다. 순서가 아닌 숫자는 무시한다.
+	local function press(number: number)
+		local button = buttons[number]
+		if not button or number ~= #submission + 1 then
+			return
+		end
+		table.insert(submission, number)
+		button.Active = false
+		button.BackgroundColor3 = Color3.fromRGB(31, 43, 58)
+		button.TextColor3 = Color3.fromRGB(147, 166, 191)
+		if #submission == settings.count then
+			onSubmit(submission)
+		end
+	end
+
+	for _, item in items do
+		local button = Instance.new("TextButton")
+		button.Name = tostring(item.number)
+		button.AnchorPoint = Vector2.new(0.5, 0.5)
+		button.Position = UDim2.fromScale(item.x, item.y)
+		button.Size = UDim2.fromScale(settings.buttonWidth, settings.buttonHeight)
+		button.BorderSizePixel = 0
+		button.BackgroundColor3 = Color3.fromRGB(50, 82, 133)
+		button.TextColor3 = Color3.new(1, 1, 1)
+		button.Text = tostring(item.number)
+		button.TextScaled = true
+		button.Font = Enum.Font.GothamBold
+		button.Parent = root
+		buttons[item.number] = button
+
+		-- 버튼이 찌그러지지 않도록 정사각형으로 맞춘다.
+		local aspect = Instance.new("UIAspectRatioConstraint")
+		aspect.AspectRatio = 1
+		aspect.Parent = button
+
+		button.Activated:Connect(function()
+			press(item.number)
+		end)
+	end
+
+	-- 퍼즐이 떠 있는 동안 숫자키 입력을 퍼즐로 받고 다른 기본 동작으로 넘기지 않음
+	ContextActionService:BindActionAtPriority(KEY_ACTION_NAME, function(_, state: Enum.UserInputState, input: InputObject)
+		if UserInputService:GetFocusedTextBox() then
+			return Enum.ContextActionResult.Pass
+		end
+		local number = keyNumbers[input.KeyCode]
+		if state == Enum.UserInputState.Begin and number then
+			press(number)
+		end
+		return Enum.ContextActionResult.Sink
+	end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three,
+		Enum.KeyCode.Four, Enum.KeyCode.Five, Enum.KeyCode.Six)
+end
+
+local NumberOrder: Types.PuzzleRenderer = { render = render, cleanup = cleanup }
+return NumberOrder
+]]></string>
+            </Properties>
+          </Item>
         </Item>
-        <Item class="ModuleScript" referent="34">
+        <Item class="ModuleScript" referent="40">
           <Properties>
             <string name="Name">RopeView</string>
             <string name="Source"><![CDATA[--!strict

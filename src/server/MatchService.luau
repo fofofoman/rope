@@ -131,6 +131,17 @@ function MatchService.start()
 				arena:SetAttribute("BuffUntil", round.participant.buffUntil)
 			end
 			Remotes.PuzzleResult:FireClient(player, id, success, reward)
+			-- 2026-11-21 InstantPull 보상 적용 (플레이어는 A팀). 줄이 끝에 닿아 경기가 끝나면 상태를 바로 전파
+			if reward == "InstantPull" then
+				local match = round.match
+				match:pull("A", Config.INSTANT_PULL)
+				arena:SetAttribute("RopePosition", match.ropePosition)
+				if match.phase == "Ended" then
+					round.participant.buffUntil = 0
+					arena:SetAttribute("BuffUntil", 0)
+				end
+				publishState(arena, round)
+			end
 		end
 	end)
 
@@ -148,8 +159,9 @@ function MatchService.start()
 			local puzzle, expiredId = PuzzleService.update(round.puzzleSchedule, round.participant, now)
 			if puzzle then
 				-- 2026-11-19 서버가 판정에 사용하는 마감 시각을 퍼즐과 함께 전송
+				-- 2026-11-21 퍼즐 종류별 제한 시간을 반영해 발행 시각과 마감 시각의 차이를 전송
 				Remotes.PuzzleIssued:FireClient(
-					round.player, puzzle.id, puzzle.definition.kind, puzzle.displayData, Config.PUZZLE_TIMEOUT, puzzle.expiresAt
+					round.player, puzzle.id, puzzle.definition.kind, puzzle.displayData, puzzle.expiresAt - puzzle.issuedAt, puzzle.expiresAt
 				)
 			elseif expiredId then
 				Remotes.PuzzleResult:FireClient(round.player, expiredId, false)

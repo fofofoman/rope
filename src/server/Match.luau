@@ -86,4 +86,18 @@ function Match.step(self: Match, dt: number, now: number): ()
 	end
 end
 
+-- 2026-11-21 InstantPull 보상: 줄을 팀 쪽으로 즉시 당기고 끝에 닿으면 경기 종료
+function Match.pull(self: Match, team: "A" | "B", amount: number): ()
+	if self.phase ~= "Playing" then
+		return
+	end
+	local limit = Config.ROPE_LIMIT
+	local direction = if team == "A" then 1 else -1
+	self.ropePosition = math.clamp(self.ropePosition + direction * amount, -limit, limit)
+	if math.abs(self.ropePosition) == limit then
+		self.phase = "Ended"
+		self.winner = team
+	end
+end
+
 return Match

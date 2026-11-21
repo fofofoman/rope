@@ -3,7 +3,8 @@
 
 return {
 	-- 2026-11-20 경기 시간을 45초에서 30초로 단축
-	ROUND_DURATION = 30,
+	-- 2026-11-21 경기 시간을 30초에서 50초로 연장
+	ROUND_DURATION = 50,
 	COUNTDOWN = 3,
 	ROPE_LIMIT = 100,
 	ROPE_SPEED = 2.5,
@@ -34,6 +35,35 @@ return {
 	PUZZLE_FIRST_DELAY = 2,
 	ARROW_SEQUENCE_LENGTH = { 4, 6 },
 	ARROW_DIRECTIONS = { "Up", "Right", "Down", "Left" },
+
+	-- 2026-11-21 퍼즐 3종(NumberOrder, ColorMatch, MiniMaze) 설정과 종류별 제목·제한 시간 추가
+	PUZZLE_TITLES = {
+		ArrowSequence = "화살표 순서",
+		NumberOrder = "숫자 순서",
+		ColorMatch = "같은 색 찾기",
+		MiniMaze = "미로 탈출",
+	} :: { [string]: string },
+	-- 목록에 없는 종류는 PUZZLE_TIMEOUT을 사용한다.
+	PUZZLE_TIMEOUT_BY_KIND = { MiniMaze = 6 } :: { [string]: number },
+	NUMBER_ORDER = { count = 6, columns = 3, rows = 2, jitter = 0.08, buttonWidth = 0.28, buttonHeight = 0.38 },
+	COLOR_MATCH = {
+		tileCount = 6,
+		columns = 3,
+		-- 타일 색은 중복 없이 뽑으므로 tileCount 이상이어야 한다.
+		names = { "Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Pink", "Cyan" },
+		colors = {
+			Red = Color3.fromRGB(225, 70, 70),
+			Orange = Color3.fromRGB(240, 150, 50),
+			Yellow = Color3.fromRGB(240, 220, 70),
+			Green = Color3.fromRGB(80, 190, 90),
+			Blue = Color3.fromRGB(70, 120, 230),
+			Purple = Color3.fromRGB(150, 90, 210),
+			Pink = Color3.fromRGB(240, 130, 190),
+			Cyan = Color3.fromRGB(70, 200, 220),
+		} :: { [string]: Color3 },
+		targetHeight = 0.28,
+	},
+	MINI_MAZE = { size = 5, wallThickness = 0.08, cursorScale = 0.5 },
 
 	BOT = {
 		Easy = { tps = 5, qteRate = 0.5, puzzleRate = 0.5 },

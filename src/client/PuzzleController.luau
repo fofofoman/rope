@@ -13,6 +13,10 @@ local Types = require(Shared.Types)
 
 local renderers: { [string]: Types.PuzzleRenderer } = {
 	ArrowSequence = require(script.Parent.PuzzleRenderers.ArrowSequence),
+	-- 2026-11-21 숫자 순서, 같은 색 찾기, 미니 미로 렌더러 등록
+	NumberOrder = require(script.Parent.PuzzleRenderers.NumberOrder),
+	ColorMatch = require(script.Parent.PuzzleRenderers.ColorMatch),
+	MiniMaze = require(script.Parent.PuzzleRenderers.MiniMaze),
 }
 
 type PresentedPuzzle = {
@@ -129,6 +133,8 @@ function PuzzleController.start(arena: Model)
 		end
 
 		clearPuzzle()
+		-- 2026-11-21 퍼즐 종류에 맞는 제목 표시
+		title.Text = Config.PUZZLE_TITLES[kind] or kind
 		local puzzle: PresentedPuzzle = {
 			id = id,
 			renderer = renderer,

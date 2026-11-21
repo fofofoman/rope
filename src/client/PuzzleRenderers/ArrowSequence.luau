@@ -1,16 +1,27 @@
 --!strict
 -- 2026-11-19 화살표 순서 표시와 마우스·터치 제출 추가
 
+local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Types = require(Shared.Types)
 
 local glyphs: { [string]: string } = { Up = "↑", Right = "→", Down = "↓", Left = "←" }
+-- 2026-11-21 PC 키보드 방향키로도 퍼즐을 입력할 수 있도록 키 매핑 추가
+local keyDirections: { [Enum.KeyCode]: string } = {
+	[Enum.KeyCode.Up] = "Up",
+	[Enum.KeyCode.Right] = "Right",
+	[Enum.KeyCode.Down] = "Down",
+	[Enum.KeyCode.Left] = "Left",
+}
+local KEY_ACTION_NAME = "PullPanicPuzzleArrow"
 local layout = Config.PUZZLE_VIEW
 local content: Frame? = nil
 
 local function cleanup()
+	ContextActionService:UnbindAction(KEY_ACTION_NAME)
 	if content then
 		content:Destroy()
 		content = nil
@@ -63,6 +74,26 @@ local function render(parent: GuiObject, displayData: any, onSubmit: (unknown) -
 	labels[1].BackgroundColor3 = Color3.fromRGB(66, 102, 156)
 
 	local submission: { string } = {}
+	-- 2026-11-21 마우스·터치와 키보드가 같은 입력 처리를 쓰도록 분리
+	local function press(direction: string)
+		if #submission >= #sequence then
+			return
+		end
+		-- 2026-11-21 틀린 방향은 실패 처리하지 않고 무시해서 맞는 키가 눌릴 때까지 진행하지 않음
+		if direction ~= sequence[#submission + 1] then
+			return
+		end
+		table.insert(submission, direction)
+		local position = #submission
+		labels[position].BackgroundColor3 = Color3.fromRGB(31, 43, 58)
+		labels[position].TextColor3 = Color3.fromRGB(147, 166, 191)
+		if position == #sequence then
+			onSubmit(submission)
+		else
+			labels[position + 1].BackgroundColor3 = Color3.fromRGB(66, 102, 156)
+		end
+	end
+
 	local directions = Config.ARROW_DIRECTIONS
 	local buttonRow = createRow(root, layout.buttonTop, 1 - layout.buttonTop)
 	for index, direction in directions do
@@ -78,20 +109,21 @@ local function render(parent: GuiObject, displayData: any, onSubmit: (unknown) -
 		button.Font = Enum.Font.GothamBold
 		button.Parent = buttonRow
 		button.Activated:Connect(function()
-			if #submission >= #sequence then
-				return
-			end
-			table.insert(submission, direction)
-			local position = #submission
-			labels[position].BackgroundColor3 = Color3.fromRGB(31, 43, 58)
-			labels[position].TextColor3 = Color3.fromRGB(147, 166, 191)
-			if position == #sequence then
-				onSubmit(submission)
-			else
-				labels[position + 1].BackgroundColor3 = Color3.fromRGB(66, 102, 156)
-			end
+			press(direction)
 		end)
 	end
+
+	-- 2026-11-21 퍼즐이 떠 있는 동안 방향키 입력을 퍼즐로 받고, 카메라 회전 등 기본 동작으로 넘기지 않음
+	ContextActionService:BindActionAtPriority(KEY_ACTION_NAME, function(_, state: Enum.UserInputState, input: InputObject)
+		if UserInputService:GetFocusedTextBox() then
+			return Enum.ContextActionResult.Pass
+		end
+		local direction = keyDirections[input.KeyCode]
+		if state == Enum.UserInputState.Begin and direction then
+			press(direction)
+		end
+		return Enum.ContextActionResult.Sink
+	end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Up, Enum.KeyCode.Right, Enum.KeyCode.Down, Enum.KeyCode.Left)
 end
 
 local ArrowSequence: Types.PuzzleRenderer = { render = render, cleanup = cleanup }

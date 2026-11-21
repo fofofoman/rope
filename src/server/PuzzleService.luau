@@ -6,15 +6,33 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Types = require(Shared.Types)
 local ArrowSequence = require(script.Parent.Puzzles.ArrowSequence)
+-- 2026-11-21 숫자 순서, 같은 색 찾기, 미니 미로 퍼즐 추가
+local ColorMatch = require(script.Parent.Puzzles.ColorMatch)
+local MiniMaze = require(script.Parent.Puzzles.MiniMaze)
+local NumberOrder = require(script.Parent.Puzzles.NumberOrder)
 
-export type Schedule = { nextAt: number? }
+export type Schedule = { nextAt: number?, lastKind: string? }
 
+local definitions: { Types.PuzzleDef } = { ArrowSequence, NumberOrder, ColorMatch, MiniMaze }
 local rng = Random.new()
 local lastPuzzleId = 0
 local PuzzleService = {}
 
 function PuzzleService.newSchedule(): Schedule
-	return { nextAt = nil }
+	return { nextAt = nil, lastKind = nil }
+end
+
+-- 같은 종류가 연속으로 나오지 않도록 직전 종류를 제외하고 무작위로 고른다.
+local function pickDefinition(schedule: Schedule): Types.PuzzleDef
+	local candidates: { Types.PuzzleDef } = {}
+	for _, definition in definitions do
+		if definition.kind ~= schedule.lastKind then
+			table.insert(candidates, definition)
+		end
+	end
+	local picked = candidates[rng:NextInteger(1, #candidates)]
+	schedule.lastKind = picked.kind
+	return picked
 end
 
 function PuzzleService.update(schedule: Schedule, participant: Types.ParticipantState, now: number): (Types.ActivePuzzle?, number?)
@@ -37,14 +55,15 @@ function PuzzleService.update(schedule: Schedule, participant: Types.Participant
 	end
 
 	lastPuzzleId += 1
-	local displayData, solutionInfo = ArrowSequence.generate(rng, rng:NextNumber())
+	local definition = pickDefinition(schedule)
+	local displayData, solutionInfo = definition.generate(rng, rng:NextNumber())
 	local puzzle: Types.ActivePuzzle = {
 		id = lastPuzzleId,
-		definition = ArrowSequence,
+		definition = definition,
 		displayData = displayData,
 		solutionInfo = solutionInfo,
 		issuedAt = now,
-		expiresAt = now + Config.PUZZLE_TIMEOUT,
+		expiresAt = now + (Config.PUZZLE_TIMEOUT_BY_KIND[definition.kind] or Config.PUZZLE_TIMEOUT),
 	}
 	participant.activePuzzle = puzzle
 	schedule.nextAt = now + rng:NextNumber(Config.PUZZLE_INTERVAL[1], Config.PUZZLE_INTERVAL[2])
